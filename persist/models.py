@@ -45,3 +45,53 @@ class AppUser(models.Model):
     class Meta:
         db_table = "app_user"
         managed = False
+
+class ConsumeCategory(models.Model):
+    id = models.CharField(primary_key=True, max_length=64)
+    parentId = models.CharField(max_length=64, null=True, blank=True)
+    code = models.CharField(max_length=64, null=True, blank=True)
+    name = models.CharField(max_length=128)
+    level = models.IntegerField(default=0)
+    txn_types = models.CharField(max_length=256, default="expense")
+    sortNo = models.IntegerField(default=0)
+    deleted = models.IntegerField(default=0)
+    version = models.IntegerField(default=0)
+    createUser = models.CharField(max_length=64, null=True, blank=True)
+    createTime = models.DateTimeField(null=True, blank=True)
+    updateUser = models.CharField(max_length=64, null=True, blank=True)
+    updateTime = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "consume_category"
+        managed = False
+
+class ConsumeRule(models.Model):
+    id = models.CharField(primary_key=True, max_length=64)
+    categoryId = models.CharField(max_length=64)
+    pattern = models.CharField(max_length=256)
+    patternType = models.CharField(max_length=32, default="contains")
+    priority = models.IntegerField(default=100)
+    active = models.IntegerField(default=1)
+    bankCode = models.CharField(max_length=32, null=True, blank=True)
+    cardTypeCode = models.CharField(max_length=32, null=True, blank=True)
+    remark = models.CharField(max_length=256, null=True, blank=True)
+    version = models.IntegerField(default=0)
+    createUser = models.CharField(max_length=64, null=True, blank=True)
+    createTime = models.DateTimeField(null=True, blank=True)
+    updateUser = models.CharField(max_length=64, null=True, blank=True)
+    updateTime = models.DateTimeField(null=True, blank=True)
+    minAmount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    maxAmount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    startDate = models.DateField(null=True, blank=True)
+    endDate = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "consume_rule"
+        managed = False
+
+class ConsumeRuleTag(models.Model):
+    rule_id = models.CharField(max_length=64)
+    tag = models.CharField(max_length=255)
+    class Meta:
+        db_table = "consume_rule_tag"
+        managed = False

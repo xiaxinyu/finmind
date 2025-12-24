@@ -21,8 +21,7 @@
         <div class="layout">
             <aside class="sidebar">
                 <div class="menu-item" :class="{active: tab==='dashboard'}" @click="tab='dashboard'">Dashboard</div>
-                <div class="menu-item" :class="{active: tab==='classify'}" @click="tab='classify'">Classify</div>
-                <div class="menu-item" :class="{active: tab==='insights'}" @click="tab='insights'">Insights</div>
+                <div class="menu-item" :class="{active: tab==='rules'}" @click="tab='rules'">Rules</div>
             </aside>
             <div class="content">
                 <div v-if="tab==='dashboard'" class="grid-2">
@@ -63,39 +62,115 @@
                         </div>
                     </div>
                 </div>
-                <div v-if="tab==='classify'" class="card">
-                    <h3>Classify Transaction</h3>
-                    <div class="row">
-                        <input v-model="form.description" placeholder="Description">
-                        <input v-model="form.money" placeholder="Amount">
-                        <button @click="classify">Classify</button>
+                <div v-if="tab==='rules'" class="grid-3">
+                    <div class="card">
+                        <div class="card-title">Categories</div>
+                        <div class="toolbar">
+                            <select v-model="selectedTxnType" @change="changeTxnType(selectedTxnType)" style="width:140px;">
+                                <option value="all">All</option>
+                                <option value="expense">Expense</option>
+                                <option value="income">Income</option>
+                            </select>
+                            <div class="dropdown" style="margin-left:8px;">
+                                <input class="dropdown-input" v-model="categoryQuery" placeholder="Search categories" @focus="catOpen=true" @keydown="onCategoryQueryKeydown">
+                                <div class="dropdown-list" v-if="catOpen">
+                                    <div class="dropdown-item" v-for="(opt,idx) in filteredCategoryOptions" :key="opt.id" :class="{active: idx===catHoverIdx}" @mousedown.prevent="pickCategory(opt)">
+                                        {{ opt.label }}
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="icon-btn" title="Reload" @click="fetchCategories">↻</button>
+                        </div>
+                        <div style="color:var(--muted); font-size:12px;">Only non-deleted categories are listed</div>
+                        <div class="breadcrumb" v-if="categoryBreadcrumb.length">
+                            <span v-for="(b,idx) in categoryBreadcrumb" :key="b.id">
+                                <span class="crumb" @click="navigateCrumb(b)">{{ b.name || b.code }}</span>
+                                <span class="sep" v-if="idx < categoryBreadcrumb.length-1">/</span>
+                            </span>
+                        </div>
+                        <div class="tree">
+                            <div class="tree-item"
+                                 v-for="c in filteredCategories"
+                                 :key="c.id"
+                                 :class="{active: selectedCategoryId===c.id}"
+                                 :style="{ paddingLeft: ((c.level||0) * 14) + 'px' }"
+                                 @click="onTreeItemClick(c, $event)">
+                                <span class="caret" :class="{ hidden: !hasChildren(c) }" @click.stop="toggleExpand(c)">{{ isExpanded(c) ? '▾' : '▸' }}</span>
+                                <span class="code">{{ c.code }}</span>
+                                <span class="name">{{ c.name }}</span>
+                                <span class="badge">{{ countFor(c) }}</span>
+                            </div>
+                        </div>
                     </div>
-                    <div v-if="result" style="margin-top:12px;">
+                    <div class="card">
+                        <div class="card-title">Rules <span v-if="selectedCategoryName" style="color:var(--muted)">— {{ selectedCategoryName }} ({{ selectedCategoryCode }})</span></div>
+                        <div class="toolbar">
+                            <input v-model="newRule.pattern" placeholder="New rule pattern" @keyup.enter="quickAddRule">
+                            <select v-model="newRule.patternType">
+                                <option value="contains">contains</option>
+                                <option value="equals">equals</option>
+                                <option value="startsWith">startsWith</option>
+                                <option value="endsWith">endsWith</option>
+                                <option value="regex">regex</option>
+                            </select>
+                            <input v-model.number="newRule.priority" type="number" placeholder="Priority">
+                            <button @click="quickAddRule">Add</button>
+                            <span class="spacer"></span>
+                            <input v-model="ruleFilter" placeholder="Search rules">
+                            <button :class="['switch', activeOnly ? 'switch-on' : '']" @click="toggleActiveOnly">{{ activeOnly ? 'Active' : 'All' }}</button>
+                        </div>
                         <table class="table">
-                            <tr><th>Name</th><td>{{ result.consumption?.name }}</td></tr>
-                            <tr><th>Code</th><td>{{ result.consumption?.value }}</td></tr>
-                            <tr><th>Keyword</th><td>{{ result.consumption?.keyword }}</td></tr>
-                        </table>
-                    </div>
-                </div>
-                <div v-if="tab==='insights'" class="card">
-                    <h3>Insights</h3>
-                    <p>Paste sample lines to compute distribution.</p>
-                    <div style="margin:8px 0;">
-                        <button @click="loadSample">Load Sample</button>
-                        <button @click="computeInsights" style="margin-left:8px;">Compute</button>
-                    </div>
-                    <div v-if="insights" style="margin-top:12px;">
-                        <table class="table">
-                            <thead><tr><th>Type</th><th>Amount</th><th>Ratio</th></tr></thead>
+                            <thead>
+                                <tr><th>#</th><th>Pattern</th><th>Type</th><th>Tags</th><th>Weight</th><th>Active</th><th>Remark</th></tr>
+                            </thead>
                             <tbody>
-                                <tr v-for="row in insights.distribution" :key="row.type">
-                                    <td>{{ row.type }}</td>
-                                    <td>{{ row.amount }}</td>
-                                    <td>{{ (row.ratio*100).toFixed(1) }}%</td>
+                                <tr v-if="rulesLoading"><td colspan="7" style="color:var(--muted)">Loading...</td></tr>
+                                <tr v-for="(r,idx) in visibleRules" :key="r.id">
+                                    <td>{{ idx+1 }}</td>
+                                    <td>{{ r.pattern }}</td>
+                                    <td>{{ r.patternType }}</td>
+                                    <td><span style="color:var(--muted)">{{ (r.tags||[]).join(', ') }}</span></td>
+                                    <td><span class="stars" @click="cycleWeight(r)">{{ starString(r.priority) }}</span></td>
+                                    <td><span @click="toggleRuleActive(r)" :class="['dot', r.active ? 'dot-on' : 'dot-off']"></span></td>
+                                    <td>{{ r.remark }}</td>
+                                </tr>
+                                <tr v-if="!visibleRules.length">
+                                    <td colspan="7" style="color:var(--muted);">No rules</td>
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Rule Detail</div>
+                        <div class="form-grid">
+                            <div class="label">Category</div><div class="field"><input :value="selectedCategoryCode" disabled></div>
+                            <div class="label">Pattern</div><div class="field field-compact"><input v-model="ruleForm.pattern"></div>
+                            <div class="label">Type</div><div class="field field-compact">
+                                <select v-model="ruleForm.patternType">
+                                    <option value="contains">contains</option>
+                                    <option value="equals">equals</option>
+                                    <option value="startsWith">startsWith</option>
+                                    <option value="endsWith">endsWith</option>
+                                    <option value="regex">regex</option>
+                                </select>
+                            </div>
+                            <div class="label">Weight</div><div class="field field-compact"><input v-model.number="ruleForm.priority" type="number"></div>
+                            <div class="label">Active</div><div class="field field-compact"><div class="tiny-switch" :class="{on: !!ruleForm.active}" @click="toggleFormActive"><span class="knob"></span></div></div>
+                            <div class="label">Bank</div><div class="field field-compact"><input v-model="ruleForm.bankCode"></div>
+                            <div class="label">Card Type</div><div class="field field-compact"><input v-model="ruleForm.cardTypeCode"></div>
+                            <div class="label">Min Amount</div><div class="field field-compact"><input v-model="ruleForm.minAmount" type="number" step="0.01"></div>
+                            <div class="label">Max Amount</div><div class="field field-compact"><input v-model="ruleForm.maxAmount" type="number" step="0.01"></div>
+                            <div class="label">Start Date</div><div class="field field-compact"><input v-model="ruleForm.startDate" type="date"></div>
+                            <div class="label">End Date</div><div class="field field-compact"><input v-model="ruleForm.endDate" type="date"></div>
+                            <div class="label">Tags</div><div class="field field-compact">
+                                <div class="chips-list">
+                                    <span class="chip" v-for="t in (ruleForm.tagsArr||[])" :key="t">{{ t }} <span class="close" @click="removeTag(t)">×</span></span>
+                                </div>
+                                <input v-model="ruleForm.tagInput" placeholder="Enter tag and press Enter" @keyup.enter="addTag">
+                            </div>
+                            <div class="label">Remark</div><div class="field field-compact"><input v-model="ruleForm.remark"></div>
+                            <div></div><div class="field"><button @click="saveRule">Save Detail</button></div>
+                        </div>
                     </div>
                 </div>
             </div>

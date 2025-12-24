@@ -7,7 +7,8 @@ from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password
 from account.analyzer.ConsumptionAnalyzer import ConsumptionAnalyzer
 from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
-from persist.models import Credit, AppUser
+from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag
+from django.db import models
 from django.conf import settings
 logger = logging.getLogger("finmind.auth")
 
@@ -244,4 +245,184 @@ def delete_credit(request):
         return HttpResponseBadRequest("not found")
     obj.deleted = 1
     obj.save(update_fields=["deleted"])
+    return JsonResponse({"ok": True})
+
+def _cat_row(obj):
+    return {
+        "id": obj.id,
+        "parentId": obj.parentId,
+        "code": obj.code,
+        "name": obj.name,
+        "level": obj.level,
+        "txn_types": obj.txn_types,
+        "sortNo": obj.sortNo,
+    }
+
+def _rule_row(obj):
+    return {
+        "id": obj.id,
+        "categoryId": obj.categoryId,
+        "pattern": obj.pattern,
+        "patternType": obj.patternType,
+        "priority": obj.priority,
+        "active": obj.active,
+        "bankCode": obj.bankCode,
+        "cardTypeCode": obj.cardTypeCode,
+        "remark": obj.remark,
+        "minAmount": float(obj.minAmount) if obj.minAmount is not None else None,
+        "maxAmount": float(obj.maxAmount) if obj.maxAmount is not None else None,
+        "startDate": obj.startDate.isoformat() if obj.startDate else None,
+        "endDate": obj.endDate.isoformat() if obj.endDate else None,
+    }
+
+@csrf_exempt
+def rule_categories(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    txn_types = (payload.get("txn_types") or "expense").lower()
+    if txn_types == "all":
+        qs = ConsumeCategory.objects.filter(deleted=0)
+    else:
+        qs = ConsumeCategory.objects.filter(deleted=0, txn_types=txn_types)
+    ordered = qs.order_by("sortNo", "code")
+    try:
+        sql = str(ordered.query)
+        logger.info("sql_rule_categories txn_types=%s sql=%s", txn_types, sql)
+        print(f"sql_rule_categories txn_types={txn_types} sql={sql}")
+    except Exception:
+        pass
+    data = [_cat_row(x) for x in ordered]
+    return JsonResponse({"rows": data})
+
+@csrf_exempt
+def rule_list(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    cid = payload.get("categoryId")
+    if not cid:
+        logger.info("rule_list_empty_no_category")
+        return JsonResponse({"rows": []})
+    cat = ConsumeCategory.objects.filter(id=cid).first() or ConsumeCategory.objects.filter(code=cid).first()
+    keys = []
+    if cat:
+        if cat.id: keys.append(cat.id)
+        if cat.code: keys.append(cat.code)
+        if cat.parentId:
+            keys.append(cat.parentId)
+            p = ConsumeCategory.objects.filter(id=cat.parentId).first() or ConsumeCategory.objects.filter(code=cat.parentId).first()
+            if p and p.code:
+                keys.append(p.code)
+    else:
+        keys.append(cid)
+    keys = list({k for k in keys if k})
+    qs = ConsumeRule.objects.filter(categoryId__in=keys).order_by("-priority", "pattern")
+    try:
+        sql = str(qs.query)
+        logger.info("sql_rule_list keys=%s sql=%s", ",".join(keys), sql)
+        print(f"sql_rule_list keys={','.join(keys)} sql={sql}")
+    except Exception:
+        pass
+    rows = list(qs)
+    ids = [x.id for x in rows]
+    tags_map = {}
+    if ids:
+        for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
+            tags_map.setdefault(t["rule_id"], []).append(t["tag"])
+    data = []
+    for x in rows:
+        r = _rule_row(x)
+        r["tags"] = tags_map.get(x.id, [])
+        data.append(r)
+    return JsonResponse({"rows": data})
+
+@csrf_exempt
+def rule_counts(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    codes = payload.get("codes") or []
+    if not isinstance(codes, list):
+        return HttpResponseBadRequest("invalid codes")
+    counts = {}
+    if codes:
+        qs = ConsumeRule.objects.filter(categoryId__in=codes)
+        agg = qs.values("categoryId").annotate(cnt=models.Count("id"))
+        try:
+            sql = str(agg.query)
+            logger.info("sql_rule_counts codes=%s sql=%s", ",".join(codes[:10]), sql)
+            print(f"sql_rule_counts codes={','.join(codes[:10])} sql={sql}")
+        except Exception:
+            pass
+        for c in agg:
+            counts[c["categoryId"]] = c["cnt"]
+    return JsonResponse({"counts": counts})
+@csrf_exempt
+def rule_save(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    rid = payload.get("id")
+    fields = ["categoryId","pattern","patternType","priority","active","bankCode","cardTypeCode","remark","minAmount","maxAmount","startDate","endDate"]
+    data = {k: payload.get(k) for k in fields}
+    tags_payload = payload.get("tags")
+    if not data.get("categoryId") or not data.get("pattern"):
+        return HttpResponseBadRequest("missing fields")
+    cat = ConsumeCategory.objects.filter(id=data["categoryId"]).first()
+    if cat:
+        data["categoryId"] = cat.code
+    if rid:
+        try:
+            obj = ConsumeRule.objects.get(id=rid)
+        except ConsumeRule.DoesNotExist:
+            return HttpResponseBadRequest("not found")
+        for k, v in data.items():
+            setattr(obj, k, v)
+        obj.save()
+        if tags_payload is not None:
+            ConsumeRuleTag.objects.filter(rule_id=obj.id).delete()
+            tags = tags_payload if isinstance(tags_payload, list) else str(tags_payload or "").split(",")
+            tags = [t.strip() for t in tags if t and t.strip()]
+            for t in tags:
+                ConsumeRuleTag.objects.create(rule_id=obj.id, tag=t)
+        return JsonResponse({"id": obj.id, "updated": True})
+    else:
+        import uuid
+        obj = ConsumeRule.objects.create(id=str(uuid.uuid4()), **data)
+        if tags_payload is not None:
+            tags = tags_payload if isinstance(tags_payload, list) else str(tags_payload or "").split(",")
+            tags = [t.strip() for t in tags if t and t.strip()]
+            for t in tags:
+                ConsumeRuleTag.objects.create(rule_id=obj.id, tag=t)
+        return JsonResponse({"id": obj.id, "created": True})
+
+@csrf_exempt
+def rule_delete(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    rid = payload.get("id")
+    if not rid:
+        return HttpResponseBadRequest("missing id")
+    try:
+        obj = ConsumeRule.objects.get(id=rid)
+    except ConsumeRule.DoesNotExist:
+        return HttpResponseBadRequest("not found")
+    obj.delete()
     return JsonResponse({"ok": True})
