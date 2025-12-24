@@ -61,6 +61,25 @@
                             </div>
                         </div>
                     </div>
+                    <div class="card">
+                        <div class="card-title">Rule Coverage</div>
+                        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px 0;">
+                            <button class="btn" @click="calculateCoverage" :disabled="coverageLoading" style="width:100%; max-width:200px; padding:12px;">
+                                <span v-if="coverageLoading">Calculating...</span>
+                                <span v-else>Calculate Coverage</span>
+                            </button>
+                            <div v-if="coverageResult" style="margin-top:24px; text-align:center;">
+                                <div style="font-size:42px; font-weight:700; color:var(--accent); line-height:1;">{{ coverageResult.rate }}<span style="font-size:20px;">%</span></div>
+                                <div style="color:var(--muted); margin-top:8px; font-size:14px;">
+                                    Matches found: <span style="color:var(--text)">{{ coverageResult.covered }}</span> / {{ coverageResult.total }}
+                                </div>
+                                <div style="color:var(--muted); font-size:12px; margin-top:4px;">Excludes "Other" categories</div>
+                            </div>
+                            <div v-else-if="!coverageLoading" style="margin-top:24px; color:var(--muted); text-align:center; font-size:13px;">
+                                Click to check how many transactions match your active rules.
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div v-if="tab==='rules'" class="grid-3">
                     <div class="card">

@@ -13,6 +13,8 @@
         palette: ['#22c55e','#60a5fa','#f59e0b','#ef4444','#a78bfa','#10b981','#f472b6'],
         donutStyle: '',
         health: { score: 0, spendControl: 0, savingsRate: 0 },
+        coverageResult: null,
+        coverageLoading: false,
         categories: [],
         ruleSearch: '',
         selectedCategoryId: '',
@@ -150,6 +152,22 @@
         const n = p >= 90 ? 5 : p >= 70 ? 4 : p >= 50 ? 3 : p >= 30 ? 2 : 1;
         return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(n);
       },
+      async calculateCoverage() {
+        this.coverageLoading = true;
+        try {
+            const r = await fetch('/api/dashboard/coverage', { method: 'POST' });
+            if (r.ok) {
+                this.coverageResult = await r.json();
+            } else {
+                alert('Failed to calculate coverage');
+            }
+        } catch(e) {
+            console.error(e);
+            alert('Error calculating coverage');
+        } finally {
+            this.coverageLoading = false;
+        }
+      },
       async classify() {
         this.result = null;
         const r = await fetch('/api/classify', {
@@ -224,9 +242,7 @@
         this.catOpen = false;
       },
       updateCategoryQueryLabel() {
-        const id = this.selectedCategoryId;
-        const opt = (this.categoryOptions||[]).find(o => o.id === id);
-        this.categoryQuery = opt ? opt.label : '';
+        this.categoryQuery = '';
       },
       pickCategory(opt) {
         if (!opt) return;

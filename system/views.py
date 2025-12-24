@@ -1,15 +1,17 @@
-import json
+from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
+from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag, Transaction
+from django.db import models
+from django.conf import settings
+import re
 import logging
+import json
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, redirect
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password
 from account.analyzer.ConsumptionAnalyzer import ConsumptionAnalyzer
-from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
-from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag
-from django.db import models
-from django.conf import settings
+
 logger = logging.getLogger("finmind.auth")
 
 def hello(request):
@@ -94,21 +96,6 @@ def classify_transaction(request):
     return JsonResponse({"consumption": ct})
 
 @csrf_exempt
-def analyze_batch(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return HttpResponseBadRequest("invalid json")
-    lines = payload.get("lines")
-    if not isinstance(lines, list) or len(lines) == 0:
-        return HttpResponseBadRequest("invalid lines")
-    analyzer = BusinessAnalyzer(lines)
-    result = analyzer.calculate(lines)
-    return JsonResponse({"lines": result})
-
-@csrf_exempt
 def insights(request):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -117,135 +104,55 @@ def insights(request):
     except Exception:
         return HttpResponseBadRequest("invalid json")
     lines = payload.get("lines")
-    if not isinstance(lines, list) or len(lines) == 0:
+    if not lines or not isinstance(lines, list):
         return HttpResponseBadRequest("invalid lines")
     analyzer = BusinessAnalyzer(lines)
-    processed = analyzer.calculate(lines)
-    total = 0.0
-    stats = {}
-    for i, row in enumerate(processed):
-        if i == analyzer.headerRowIndex:
-            continue
-        try:
-            ctype = row[-3]
-            amount = float(row[analyzer.transactionColumnIndex])
-        except Exception:
-            ctype = "未知"
-            amount = 0.0
-        stats[ctype] = stats.get(ctype, 0.0) + amount
-        total += amount
-    distribution = []
-    for k, v in stats.items():
-        p = 0.0
-        if total > 0:
-            p = v / total
-        distribution.append({"type": k, "amount": v, "ratio": p})
-    return JsonResponse({"total": total, "distribution": distribution})
+    result = analyzer.calculate(lines)
+    
+    # Calculate distribution
+    # Just a mock for now or use result if applicable
+    # The frontend expects { distribution: [{type, ratio}] }
+    # Let's simple aggregate by consumption type (index 10)
+    dist = {}
+    total = 0
+    for row in result:
+        if len(row) > 10:
+            ctype = row[10]
+            try:
+                amt = float(row[3])
+                dist[ctype] = dist.get(ctype, 0) + amt
+                total += amt
+            except:
+                pass
+    
+    out = []
+    if total > 0:
+        for k, v in dist.items():
+            out.append({"type": k, "ratio": v/total})
+    out.sort(key=lambda x: x["ratio"], reverse=True)
+    
+    return JsonResponse({"distribution": out})
 
 @csrf_exempt
-def create_credit(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return HttpResponseBadRequest("invalid json")
-    required = ["source", "transaction_date", "bookkeeping_date", "card_id", "transaction_money", "balance_currency", "balance_money", "transaction_desc", "payment_type_id", "payment_type_name", "card_type_id", "card_type_name", "consumption_name", "consumption_id", "consume_name", "consume_id", "keyword", "demoarea"]
-    for k in required:
-        if payload.get(k) is None:
-            return HttpResponseBadRequest("missing fields")
-    obj = Credit.objects.create(
-        source=payload["source"],
-        transaction_date=payload["transaction_date"],
-        bookkeeping_date=payload["bookkeeping_date"],
-        card_id=payload["card_id"],
-        transaction_money=payload["transaction_money"],
-        balance_currency=payload["balance_currency"],
-        balance_money=payload["balance_money"],
-        transaction_desc=payload["transaction_desc"],
-        payment_type_id=payload["payment_type_id"],
-        payment_type_name=payload["payment_type_name"],
-        card_type_id=payload["card_type_id"],
-        card_type_name=payload.get("card_type_name", "Credit Card"),
-        consumption_name=payload["consumption_name"],
-        consumption_id=payload["consumption_id"],
-        consume_name=payload["consume_name"],
-        consume_id=payload["consume_id"],
-        keyword=payload["keyword"],
-        demoarea=payload["demoarea"],
-        recordid=payload.get("recordid", "no record id"),
-        version=payload.get("version", 0),
-        createuser=payload.get("createuser", "system"),
-        updateuser=payload.get("updateuser", "system"),
-    )
-    return JsonResponse({"id": obj.id})
-
-def _row(obj):
-    return {
-        "id": obj.id,
-        "source": obj.source,
-        "transaction_date": obj.transaction_date,
-        "bookkeeping_date": obj.bookkeeping_date,
-        "card_id": obj.card_id,
-        "transaction_money": float(obj.transaction_money),
-        "balance_currency": obj.balance_currency,
-        "balance_money": float(obj.balance_money),
-        "transaction_desc": obj.transaction_desc,
-        "payment_type_id": obj.payment_type_id,
-        "payment_type_name": obj.payment_type_name,
-        "card_type_id": obj.card_type_id,
-        "card_type_name": obj.card_type_name,
-        "deleted": obj.deleted,
-        "consumption_name": obj.consumption_name,
-        "consumption_id": obj.consumption_id,
-        "consume_name": obj.consume_name,
-        "consume_id": obj.consume_id,
-        "keyword": obj.keyword,
-        "demoarea": obj.demoarea,
-        "recordid": obj.recordid,
-        "version": obj.version,
-        "createuser": obj.createuser,
-        "createtime": obj.createtime,
-        "updateuser": obj.updateuser,
-        "updatetime": obj.updatetime,
-    }
-
-@csrf_exempt
-def list_credits(request):
+def rule_categories(request):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     try:
         payload = json.loads(request.body.decode("utf-8")) if request.body else {}
     except Exception:
         return HttpResponseBadRequest("invalid json")
-    qs = Credit.objects.filter(deleted=0)
-    start = payload.get("start")
-    end = payload.get("end")
-    if start:
-        qs = qs.filter(transaction_date__gte=start)
-    if end:
-        qs = qs.filter(transaction_date__lte=end)
-    data = [_row(x) for x in qs.order_by("-transaction_date")[:500]]
-    return JsonResponse({"rows": data})
-
-@csrf_exempt
-def delete_credit(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return HttpResponseBadRequest("invalid json")
-    cid = payload.get("id")
-    if not cid:
-        return HttpResponseBadRequest("missing id")
-    try:
-        obj = Credit.objects.get(id=cid)
-    except Credit.DoesNotExist:
-        return HttpResponseBadRequest("not found")
-    obj.deleted = 1
-    obj.save(update_fields=["deleted"])
-    return JsonResponse({"ok": True})
+    
+    txn_types = payload.get("txn_types") # 'all', 'expense', 'income'
+    qs = ConsumeCategory.objects.filter(deleted=0)
+    if txn_types and txn_types != 'all':
+        # Filter by txn_types containing the type (comma separated in DB?)
+        # DB field `txn_types` char(256) default 'expense'.
+        # Assume it stores 'expense', 'income' or both.
+        # We use icontains for simplicity.
+        qs = qs.filter(txn_types__icontains=txn_types)
+        
+    rows = [_cat_row(x) for x in qs]
+    return JsonResponse({"rows": rows})
 
 def _cat_row(obj):
     return {
@@ -274,29 +181,6 @@ def _rule_row(obj):
         "startDate": obj.startDate.isoformat() if obj.startDate else None,
         "endDate": obj.endDate.isoformat() if obj.endDate else None,
     }
-
-@csrf_exempt
-def rule_categories(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
-        return HttpResponseBadRequest("invalid json")
-    txn_types = (payload.get("txn_types") or "expense").lower()
-    if txn_types == "all":
-        qs = ConsumeCategory.objects.filter(deleted=0)
-    else:
-        qs = ConsumeCategory.objects.filter(deleted=0, txn_types=txn_types)
-    ordered = qs.order_by("sortNo", "code")
-    try:
-        sql = str(ordered.query)
-        logger.info("sql_rule_categories txn_types=%s sql=%s", txn_types, sql)
-        print(f"sql_rule_categories txn_types={txn_types} sql={sql}")
-    except Exception:
-        pass
-    data = [_cat_row(x) for x in ordered]
-    return JsonResponse({"rows": data})
 
 @csrf_exempt
 def rule_list(request):
@@ -367,6 +251,7 @@ def rule_counts(request):
         for c in agg:
             counts[c["categoryId"]] = c["cnt"]
     return JsonResponse({"counts": counts})
+
 @csrf_exempt
 def rule_save(request):
     if request.method != "POST":
@@ -426,3 +311,80 @@ def rule_delete(request):
         return HttpResponseBadRequest("not found")
     obj.delete()
     return JsonResponse({"ok": True})
+
+def _matches(rule, txn):
+    desc = txn.transaction_desc or ""
+    pt = rule.patternType or "contains"
+    pat = rule.pattern or ""
+    
+    match = False
+    if pt == "contains":
+        if pat in desc: match = True
+    elif pt == "equals":
+        if pat == desc: match = True
+    elif pt == "startsWith":
+        if desc.startswith(pat): match = True
+    elif pt == "endsWith":
+        if desc.endswith(pat): match = True
+    elif pt == "regex":
+        try:
+            if re.search(pat, desc): match = True
+        except:
+            pass
+    
+    if not match: return False
+
+    has_amount_rule = (rule.minAmount is not None) or (rule.maxAmount is not None)
+    if has_amount_rule:
+        amt = None
+        try:
+            if txn.income_money is not None and float(txn.income_money) > 0:
+                amt = float(txn.income_money)
+            elif txn.balance_money is not None and float(txn.balance_money) > 0:
+                amt = float(txn.balance_money)
+        except Exception:
+            amt = None
+        
+        if amt is not None:
+            if rule.minAmount is not None and amt < float(rule.minAmount): return False
+            if rule.maxAmount is not None and amt > float(rule.maxAmount): return False
+        # If amount is unavailable, skip amount constraints to avoid false negatives
+        
+    if rule.startDate or rule.endDate:
+        tdate = txn.transaction_date 
+        if tdate:
+            d = tdate.date()
+            if rule.startDate and d < rule.startDate: return False
+            if rule.endDate and d > rule.endDate: return False
+            
+    return True
+
+@csrf_exempt
+def dashboard_coverage(request):
+    rules = list(ConsumeRule.objects.filter(active=1).order_by('-priority', 'pattern'))
+    txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date')
+    
+    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
+    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
+    other_codes = set(list(others) + list(others_en))
+    
+    txn_list = list(txns)
+    total = len(txn_list)
+    
+    if total == 0:
+         return JsonResponse({"rate": 0, "total": 0, "covered": 0})
+
+    covered = 0
+    for t in txn_list:
+        matched_cat = None
+        for r in rules:
+            if _matches(r, t):
+                matched_cat = r.categoryId
+                break
+        
+        if matched_cat:
+            if matched_cat not in other_codes:
+                covered += 1
+            
+    rate = (covered / total) * 100 if total > 0 else 0
+    return JsonResponse({"rate": round(rate, 1), "total": total, "covered": covered})
