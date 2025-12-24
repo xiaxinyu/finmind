@@ -1,0 +1,75 @@
+:root {
+  --bg:#0f172a;
+  --card:#111827;
+  --text:#e5e7eb;
+  --muted:#94a3b8;
+  --accent:#22c55e;
+  --danger:#ef4444;
+  --border:#1f2937;
+}
+* { box-sizing:border-box; }
+html,body { height:100%; }
+body {
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:radial-gradient(1200px 600px at 70% 100%, #0b1020 0%, #0f172a 45%, #0b1020 100%);
+  color:var(--text);
+}
+.login-wrap {
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+}
+.card {
+  width:100%;
+  max-width:440px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:24px;
+  box-shadow:0 20px 40px rgba(0,0,0,0.35);
+}
+.brand { margin-bottom:16px; }
+.brand .title { font-size:24px; font-weight:700; letter-spacing:.2px; }
+.brand .subtitle { font-size:14px; color:var(--muted); margin-top:4px; }
+.form .field { margin:14px 0; }
+.form label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+.form input {
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:#0b1222;
+  color:var(--text);
+  outline:none;
+}
+.pwd { display:flex; gap:8px; align-items:center; }
+.pwd input { flex:1; }
+.pwd button {
+  border:1px solid var(--border);
+  background:#0b1222;
+  color:var(--muted);
+  padding:10px 12px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.submit {
+  width:100%;
+  margin-top:12px;
+  padding:10px 14px;
+  border:none;
+  border-radius:10px;
+  background:linear-gradient(90deg,#22c55e,#16a34a);
+  color:#0b1222;
+  font-weight:600;
+  cursor:pointer;
+}
+.error {
+  margin-top:10px;
+  color:var(--danger);
+  font-size:13px;
+  display:none;
+}
+.error.visible { display:block; }

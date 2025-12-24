@@ -14,7 +14,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "engine",
+    "system",
     "persist",
 ]
 
@@ -33,7 +33,7 @@ ROOT_URLCONF = "finmind_site.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [str(BASE_DIR / "finmind_site" / "templates")],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -49,7 +49,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "finmind_site.wsgi.application"
 ASGI_APPLICATION = "finmind_site.asgi.application"
 
-if os.environ.get("DB_ENGINE", "sqlite").lower() == "mysql":
+if os.environ.get("DB_ENGINE", "mysql").lower() == "mysql":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.mysql",
@@ -78,5 +78,25 @@ TIME_ZONE = "Asia/Shanghai"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [
+    str(BASE_DIR / "system" / "static"),
+]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "finmind.auth": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

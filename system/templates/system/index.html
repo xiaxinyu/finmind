@@ -1,0 +1,109 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>FinMind</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="{% static 'system/favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'system/css/app.css' %}">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="brand">FinMind</div>
+            <nav class="nav">
+                <span class="welcome">Hi, {{ request.session.app_display_name }}</span>
+                <a href="/logout" class="link" style="margin-left:12px;">Logout</a>
+            </nav>
+        </header>
+        {% verbatim %}
+        <div class="layout">
+            <aside class="sidebar">
+                <div class="menu-item" :class="{active: tab==='dashboard'}" @click="tab='dashboard'">Dashboard</div>
+                <div class="menu-item" :class="{active: tab==='classify'}" @click="tab='classify'">Classify</div>
+                <div class="menu-item" :class="{active: tab==='insights'}" @click="tab='insights'">Insights</div>
+            </aside>
+            <div class="content">
+                <div v-if="tab==='dashboard'" class="grid-2">
+                    <div class="card">
+                        <div class="card-title">2025 Consumption Structure</div>
+                        <div class="donut-wrap">
+                            <div class="donut" :style="{ background: donutStyle }"></div>
+                            <ul class="legend">
+                                <li v-for="(row, i) in distribution" :key="row.type">
+                                    <span class="swatch" :style="{ background: palette[i % palette.length] }"></span>
+                                    <span class="name">{{ row.type }}</span>
+                                    <span class="val">{{ (row.ratio*100).toFixed(1) }}%</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="summary">
+                            <div v-for="row in distribution" :key="row.type" class="summary-row">
+                                <div class="summary-name">{{ row.type }}</div>
+                                <div class="summary-bar">
+                                    <div class="summary-fill" :style="{ width: (row.ratio*100).toFixed(1) + '%'}"></div>
+                                </div>
+                                <div class="summary-val">{{ (row.ratio*100).toFixed(1) }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Financial Health Score</div>
+                        <div class="score-badge">Score: {{ health.score }}</div>
+                        <div class="score-list">
+                            <div class="score-item">
+                                <div class="score-name">Spend Control (30%)</div>
+                                <div class="score-val">{{ Math.round(health.spendControl) }} / 100</div>
+                            </div>
+                            <div class="score-item">
+                                <div class="score-name">Savings Rate (20%)</div>
+                                <div class="score-val">{{ Math.round(health.savingsRate) }} / 100</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="tab==='classify'" class="card">
+                    <h3>Classify Transaction</h3>
+                    <div class="row">
+                        <input v-model="form.description" placeholder="Description">
+                        <input v-model="form.money" placeholder="Amount">
+                        <button @click="classify">Classify</button>
+                    </div>
+                    <div v-if="result" style="margin-top:12px;">
+                        <table class="table">
+                            <tr><th>Name</th><td>{{ result.consumption?.name }}</td></tr>
+                            <tr><th>Code</th><td>{{ result.consumption?.value }}</td></tr>
+                            <tr><th>Keyword</th><td>{{ result.consumption?.keyword }}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div v-if="tab==='insights'" class="card">
+                    <h3>Insights</h3>
+                    <p>Paste sample lines to compute distribution.</p>
+                    <div style="margin:8px 0;">
+                        <button @click="loadSample">Load Sample</button>
+                        <button @click="computeInsights" style="margin-left:8px;">Compute</button>
+                    </div>
+                    <div v-if="insights" style="margin-top:12px;">
+                        <table class="table">
+                            <thead><tr><th>Type</th><th>Amount</th><th>Ratio</th></tr></thead>
+                            <tbody>
+                                <tr v-for="row in insights.distribution" :key="row.type">
+                                    <td>{{ row.type }}</td>
+                                    <td>{{ row.amount }}</td>
+                                    <td>{{ (row.ratio*100).toFixed(1) }}%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endverbatim %}
+        <div class="footer"><a href="/">Home</a></div>
+    </div>
+    <script src="{% static 'system/js/vue.global.prod.js' %}"></script>
+    <script src="{% static 'system/js/app.js' %}"></script>
+</body>
+</html>

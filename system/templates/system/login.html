@@ -1,0 +1,49 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FinMind | Sign In</title>
+    <link rel="icon" href="{% static 'system/favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'system/css/login.css' %}">
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="card">
+            <div class="brand">
+                <div class="title">FinMind</div>
+                <div class="subtitle">Understand your money. Understand yourself.</div>
+            </div>
+            <form id="login-form" class="form" method="post" action="/authentication/form">
+                {% csrf_token %}
+                <div class="field">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" placeholder="Enter username" autocomplete="username" required>
+                </div>
+                <div class="field">
+                    <label for="password">Password</label>
+                    <div class="pwd">
+                        <input type="password" id="password" name="password" placeholder="Enter password" autocomplete="current-password" required>
+                        <button type="button" id="togglePwd" aria-label="toggle password">Show</button>
+                    </div>
+                </div>
+                <button class="submit" type="submit">Sign In</button>
+                <div id="error-tip" class="error" role="alert" aria-live="polite"></div>
+            </form>
+        </div>
+    </div>
+    <script src="{% static 'system/js/login.js' %}"></script>
+    <script>
+        (function(){
+            fetch('/login-error.json', { credentials: 'same-origin' })
+                .then(function(r){ return r.json(); })
+                .then(function(d){
+                    var tip = document.getElementById('error-tip');
+                    tip.textContent = (d && d.msg) ? d.msg : '';
+                    tip.classList.toggle('visible', !!(d && d.msg));
+                }).catch(function(){});
+        })();
+    </script>
+</body>
+</html>

@@ -30,3 +30,18 @@ class Credit(models.Model):
     class Meta:
         db_table = "CREDIT"
 
+class AppUser(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    username = models.CharField(max_length=64)
+    password = models.CharField(max_length=128)
+    display_name = models.CharField(max_length=128, null=True, blank=True)
+    enabled = models.IntegerField(default=1)
+    version = models.IntegerField(default=0)
+    createUser = models.CharField(max_length=64, null=True, blank=True)
+    createTime = models.DateTimeField(null=True, blank=True)
+    updateUser = models.CharField(max_length=64, null=True, blank=True)
+    updateTime = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "app_user"
+        managed = False

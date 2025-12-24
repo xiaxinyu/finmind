@@ -1,12 +1,80 @@
 import json
+import logging
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.shortcuts import render, redirect
+from django.contrib.auth import logout
+from django.contrib.auth.hashers import check_password
 from account.analyzer.ConsumptionAnalyzer import ConsumptionAnalyzer
 from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
-from persist.models import Credit
+from persist.models import Credit, AppUser
+from django.conf import settings
+logger = logging.getLogger("finmind.auth")
 
 def hello(request):
     return HttpResponse("Hello, World!")
+
+def login_page(request):
+    return render(request, "system/login.html")
+
+@csrf_exempt
+def authentication_form(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    username = request.POST.get("username")
+    password = request.POST.get("password")
+    u = AppUser.objects.filter(username=username, enabled=1).first()
+    ok = False
+    if u:
+        stored = u.password or ""
+        try:
+            if stored.startswith("$2"):  # bcrypt from external system
+                import bcrypt
+                ok = bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+            else:
+                ok = check_password(password, stored) or (stored == password)
+        except Exception:
+            ok = (stored == password)
+    if not ok:
+        logger.warning("login_failed user=%s ip=%s", username, request.META.get("REMOTE_ADDR"))
+        request.session["login_error"] = "Invalid username or password"
+        return redirect("/login")
+    logger.info("login_success user=%s id=%s ip=%s", u.username, u.id, request.META.get("REMOTE_ADDR"))
+    request.session["app_user_id"] = u.id
+    request.session["app_username"] = u.username
+    request.session["app_display_name"] = u.display_name or u.username
+    request.session.pop("login_error", None)
+    return redirect("/home")
+
+def login_error_json(request):
+    msg = request.session.get("login_error", "")
+    return JsonResponse({"msg": msg or ""})
+
+def home_page(request):
+    if not request.session.get("app_user_id"):
+        logger.info("home_redirect_to_login ip=%s", request.META.get("REMOTE_ADDR"))
+        return redirect("/login")
+    logger.info("home_access user=%s id=%s ip=%s", request.session.get("app_username"), request.session.get("app_user_id"), request.META.get("REMOTE_ADDR"))
+    return render(request, "system/index.html")
+
+def logout_view(request):
+    logout(request)
+    for k in ["app_user_id", "app_username", "app_display_name"]:
+        request.session.pop(k, None)
+    logger.info("logout user=%s ip=%s", request.session.get("app_username"), request.META.get("REMOTE_ADDR"))
+    return redirect("/login")
+
+def page_not_found(request, exception=None):
+    return render(request, "errors/404.html", status=404)
+
+def server_error(request):
+    return render(request, "errors/500.html", status=500)
+
+def app_error(request):
+    return render(request, "errors/error.html")
+
+def favicon_ico(request):
+    return redirect(f"{settings.STATIC_URL}system/favicon.svg")
 
 @csrf_exempt
 def classify_transaction(request):
@@ -52,7 +120,6 @@ def insights(request):
         return HttpResponseBadRequest("invalid lines")
     analyzer = BusinessAnalyzer(lines)
     processed = analyzer.calculate(lines)
-    index_name = "消费类型名称"
     total = 0.0
     stats = {}
     for i, row in enumerate(processed):
