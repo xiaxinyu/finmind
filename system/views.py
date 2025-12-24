@@ -2,6 +2,7 @@ from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
 from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag, Transaction
 from django.db import models
 from django.conf import settings
+import unicodedata
 import re
 import logging
 import json
@@ -312,38 +313,71 @@ def rule_delete(request):
     obj.delete()
     return JsonResponse({"ok": True})
 
-def _matches(rule, txn):
-    desc = txn.transaction_desc or ""
+def _norm(s):
+    try:
+        s = unicodedata.normalize("NFKC", s or "")
+    except Exception:
+        s = s or ""
+    s = s.strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def _amount_of(txn):
+    try:
+        vals = []
+        if txn.income_money is not None:
+            vals.append(float(txn.income_money))
+        if txn.balance_money is not None:
+            vals.append(float(txn.balance_money))
+        vals = [abs(v) for v in vals if not (v is None)]
+        if not vals:
+            return None
+        return max(vals)
+    except Exception:
+        return None
+
+def _matches(rule, txn, tags=None):
+    desc = _norm(txn.transaction_desc or "")
+    opp = _norm(getattr(txn, "opponent_name", "") or "") + " " + _norm(getattr(txn, "opponent_account", "") or "")
+    extra = " ".join([
+        _norm(getattr(txn, "consume_name", "") or ""),
+        _norm(getattr(txn, "consume_code", "") or ""),
+        _norm(getattr(txn, "card_type_name", "") or ""),
+        _norm(getattr(txn, "bank_card_name", "") or "")
+    ]).strip()
+    text = " ".join([desc, opp, extra]).strip()
     pt = rule.patternType or "contains"
     pat = rule.pattern or ""
     
     match = False
     if pt == "contains":
-        if pat in desc: match = True
+        if pat and _norm(pat) in text: match = True
     elif pt == "equals":
-        if pat == desc: match = True
+        if pat and _norm(pat) == desc: match = True
     elif pt == "startsWith":
-        if desc.startswith(pat): match = True
+        if pat and desc.startswith(_norm(pat)): match = True
     elif pt == "endsWith":
-        if desc.endswith(pat): match = True
+        if pat and desc.endswith(_norm(pat)): match = True
     elif pt == "regex":
         try:
-            if re.search(pat, desc): match = True
+            if pat and re.search(pat, text): match = True
         except:
+            pass
+    if not match and tags:
+        try:
+            for t in tags:
+                tt = _norm(str(t or ""))
+                if tt and tt in text:
+                    match = True
+                    break
+        except Exception:
             pass
     
     if not match: return False
 
     has_amount_rule = (rule.minAmount is not None) or (rule.maxAmount is not None)
     if has_amount_rule:
-        amt = None
-        try:
-            if txn.income_money is not None and float(txn.income_money) > 0:
-                amt = float(txn.income_money)
-            elif txn.balance_money is not None and float(txn.balance_money) > 0:
-                amt = float(txn.balance_money)
-        except Exception:
-            amt = None
+        amt = _amount_of(txn)
         
         if amt is not None:
             if rule.minAmount is not None and amt < float(rule.minAmount): return False
@@ -363,6 +397,11 @@ def _matches(rule, txn):
 def dashboard_coverage(request):
     rules = list(ConsumeRule.objects.filter(active=1).order_by('-priority', 'pattern'))
     txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date')
+    ids = [x.id for x in rules]
+    tags_map = {}
+    if ids:
+        for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
+            tags_map.setdefault(t["rule_id"], []).append(t["tag"])
     
     others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
     others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
@@ -378,7 +417,7 @@ def dashboard_coverage(request):
     for t in txn_list:
         matched_cat = None
         for r in rules:
-            if _matches(r, t):
+            if _matches(r, t, tags_map.get(r.id, [])):
                 matched_cat = r.categoryId
                 break
         
@@ -388,3 +427,36 @@ def dashboard_coverage(request):
             
     rate = (covered / total) * 100 if total > 0 else 0
     return JsonResponse({"rate": round(rate, 1), "total": total, "covered": covered})
+
+@csrf_exempt
+def dashboard_unmatched_tops(request):
+    rules = list(ConsumeRule.objects.filter(active=1).order_by('-priority', 'pattern'))
+    txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date')
+    ids = [x.id for x in rules]
+    tags_map = {}
+    if ids:
+        for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
+            tags_map.setdefault(t["rule_id"], []).append(t["tag"])
+    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
+    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
+    other_codes = set(list(others) + list(others_en))
+    txn_list = list(txns)
+    freq = {}
+    samples = {}
+    for t in txn_list:
+        matched_cat = None
+        for r in rules:
+            if _matches(r, t, tags_map.get(r.id, [])):
+                matched_cat = r.categoryId
+                break
+        if (not matched_cat) or (matched_cat in other_codes):
+            key = _norm(t.transaction_desc or "")
+            if not key:
+                key = "(empty)"
+            freq[key] = freq.get(key, 0) + 1
+            if key not in samples:
+                samples[key] = t.transaction_desc or ""
+    tops = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
+    tops = tops[:50]
+    rows = [{"desc": samples[k], "count": v} for k, v in tops]
+    return JsonResponse({"rows": rows})

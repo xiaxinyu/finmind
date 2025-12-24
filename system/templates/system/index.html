@@ -80,6 +80,38 @@
                             </div>
                         </div>
                     </div>
+                    <div class="card">
+                        <div class="card-title">Unmatched Top List</div>
+                        <div class="toolbar">
+                            <select v-model="selectedUnmatchedCategory" style="width:220px;">
+                                <option value="">Choose category</option>
+                                <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
+                            </select>
+                            <input v-model="selectedRuleIdForTag" placeholder="Rule ID for Add Tag" style="width:220px;">
+                            <button class="icon-btn" title="Reload" @click="fetchUnmatchedTops">↻</button>
+                            <span class="spacer"></span>
+                            <div style="color:var(--muted);">Pick a category to create rules quickly</div>
+                        </div>
+                        <table class="table">
+                            <thead>
+                                <tr><th>Desc</th><th style="width:90px;">Count</th><th style="width:220px;">Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr v-if="unmatchedLoading"><td colspan="3" style="color:var(--muted)">Loading...</td></tr>
+                                <tr v-for="row in unmatchedRows" :key="row.desc">
+                                    <td>{{ row.desc }}</td>
+                                    <td>{{ row.count }}</td>
+                                    <td>
+                                        <button @click="createRuleFromUnmatched(row)" :disabled="!selectedUnmatchedCategory">Create Rule</button>
+                                        <button @click="addTagFromUnmatched(row)" :disabled="!selectedRuleIdForTag">Add Tag</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="!unmatchedRows.length && !unmatchedLoading">
+                                    <td colspan="3" style="color:var(--muted);">No data</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 <div v-if="tab==='rules'" class="grid-3">
                     <div class="card">

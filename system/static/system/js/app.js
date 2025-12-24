@@ -15,6 +15,10 @@
         health: { score: 0, spendControl: 0, savingsRate: 0 },
         coverageResult: null,
         coverageLoading: false,
+        unmatchedRows: [],
+        unmatchedLoading: false,
+        selectedUnmatchedCategory: '',
+        selectedRuleIdForTag: '',
         categories: [],
         ruleSearch: '',
         selectedCategoryId: '',
@@ -167,6 +171,48 @@
         } finally {
             this.coverageLoading = false;
         }
+      },
+      async fetchUnmatchedTops() {
+        this.unmatchedLoading = true;
+        try {
+          const r = await fetch('/api/dashboard/unmatched-tops', { method:'POST' });
+          if (r.ok) {
+            const d = await r.json();
+            this.unmatchedRows = Array.isArray(d.rows) ? d.rows : [];
+          } else {
+            this.unmatchedRows = [];
+          }
+        } catch(e) {
+          this.unmatchedRows = [];
+        } finally {
+          this.unmatchedLoading = false;
+        }
+      },
+      async createRuleFromUnmatched(row) {
+        if (!row || !row.desc || !this.selectedUnmatchedCategory) return;
+        const payload = { categoryId: this.selectedUnmatchedCategory, pattern: row.desc, patternType: 'contains', priority: 70, active: 1 };
+        const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if (r.ok) {
+          alert('Rule created');
+        }
+      },
+      async addTagFromUnmatched(row) {
+        if (!row || !row.desc || !this.selectedRuleIdForTag || !this.selectedUnmatchedCategory) return;
+        try {
+          const rl = await fetch('/api/rule/list', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ categoryId:this.selectedUnmatchedCategory }) });
+          if (!rl.ok) return;
+          const d = await rl.json();
+          const rules = Array.isArray(d.rows) ? d.rows : [];
+          const obj = rules.find(x => x.id === this.selectedRuleIdForTag);
+          if (!obj) { alert('Rule not found in selected category'); return; }
+          const tags = Array.isArray(obj.tags) ? obj.tags.slice() : [];
+          if (!tags.includes(row.desc)) tags.push(row.desc);
+          const payload = Object.assign({}, obj, { tags, categoryId: this.selectedUnmatchedCategory });
+          const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          if (resp.ok) {
+            alert('Tag added');
+          }
+        } catch(e) {}
       },
       async classify() {
         this.result = null;
@@ -511,6 +557,7 @@
     mounted() {
       this.loadDashboard();
       this.fetchCategories();
+      this.fetchUnmatchedTops();
     }
   }).mount('#app');
 })(); 
