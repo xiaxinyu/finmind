@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env file
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = "replace-this-in-production"
 DEBUG = True
@@ -16,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "system",
     "persist",
+    "core",
 ]
 
 MIDDLEWARE = [

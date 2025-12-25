@@ -39,7 +39,15 @@
         selectedCardType: '',
         bulkWeight: 100,
         selectedTxnType: 'all',
-        expandedIds: {}
+        expandedIds: {},
+        chatMessages: [{ role: 'assistant', content: 'Hello! I am FinMind AI. How can I help you today?' }],
+        chatInput: '',
+        chatLoading: false,
+        chatStatus: 'idle',
+        chatRespStatus: null,
+        chatError: '',
+        busyMode: '',
+        chatTimestamp: ''
       };
     },
     created() {
@@ -157,6 +165,7 @@
         return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(n);
       },
       async calculateCoverage() {
+        if (this.busyMode === 'chat') { try{ console.log('[FinMind] skip coverage during chat'); }catch(e){}; return; }
         this.coverageLoading = true;
         try {
             const r = await fetch('/api/dashboard/coverage', { method: 'POST' });
@@ -170,6 +179,83 @@
             alert('Error calculating coverage');
         } finally {
             this.coverageLoading = false;
+        }
+      },
+      retryLastChat() {
+        if (this.chatLoading) return;
+        if (this.chatStatus !== 'error') return;
+        const lastUser = [...this.chatMessages].reverse().find(m => m.role === 'user');
+        if (!lastUser || !lastUser.content) return;
+        this.chatInput = lastUser.content;
+        this.sendChatMessage();
+      },
+      clearChat() {
+        if (this.chatLoading) return;
+        this.chatMessages = [{ role: 'assistant', content: 'Hello! I am FinMind AI. How can I help you today?' }];
+        this.chatStatus = 'idle';
+        this.chatRespStatus = null;
+        this.chatError = '';
+        this.chatTimestamp = '';
+      },
+      copyMessage(i) {
+        const msg = this.chatMessages[i];
+        if (!msg || !msg.content) return;
+        try {
+          navigator.clipboard && navigator.clipboard.writeText(msg.content);
+        } catch(e) {}
+      },
+      async sendChatMessage() {
+        const text = (this.chatInput||'').trim();
+        if (!text) return;
+        try { console.log('[FinMind] sendChatMessage:', text); } catch(e){}
+        this.busyMode = 'chat';
+        this.chatTimestamp = new Date().toLocaleTimeString();
+        this.chatMessages.push({ role: 'user', content: text });
+        this.chatInput = '';
+        this.chatLoading = true;
+        this.chatStatus = 'sending';
+        this.chatRespStatus = null;
+        this.chatError = '';
+        
+        try {
+          const r = await fetch('/api/agents/chat', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ query: text })
+          });
+          try { console.log('[FinMind] chat resp status:', r.status); } catch(e){}
+          this.chatRespStatus = r.status;
+          if (r.ok) {
+            const d = await r.json();
+            const msg = d.response || 'No response.';
+            if (msg === 'OTHER' || /^Error/i.test(msg)) {
+              this.chatMessages.push({ role: 'assistant', content: 'AI服务不可用或密钥无效，请检查 QWEN_API_KEY。' });
+              this.chatStatus = 'error';
+              this.chatError = 'LLM unavailable';
+              try { console.warn('[FinMind] chat LLM unavailable, response=', msg); } catch(e){}
+            } else {
+              this.chatMessages.push({ role: 'assistant', content: msg });
+              this.chatStatus = 'received';
+              this.chatTimestamp = new Date().toLocaleTimeString();
+            }
+          } else {
+            this.chatMessages.push({ role: 'assistant', content: 'Sorry, I encountered an error.' });
+            this.chatStatus = 'error';
+            this.chatError = 'HTTP ' + r.status;
+          }
+        } catch(e) {
+          try { console.error('[FinMind] chat error:', e); } catch(_){}
+          this.chatMessages.push({ role: 'assistant', content: 'Network error.' });
+          this.chatStatus = 'error';
+          this.chatError = 'Network error';
+        } finally {
+          this.chatLoading = false;
+          this.busyMode = '';
+          // scroll to bottom
+          this.$nextTick(() => {
+            const box = document.querySelector('.chat-box');
+            if (box) box.scrollTop = box.scrollHeight;
+          });
         }
       },
       async fetchUnmatchedTops() {
@@ -435,6 +521,7 @@
         this.fetchRules();
       },
       async fetchRules() {
+        if (this.busyMode === 'chat') { try{ console.log('[FinMind] skip rule/list during chat'); }catch(e){}; return; }
         if (!this.selectedCategoryId) return;
         this.rulesLoading = true;
         this.errorMsg = '';

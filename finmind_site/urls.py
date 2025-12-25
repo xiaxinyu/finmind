@@ -8,6 +8,7 @@ from system import views as system_views
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("system.urls")),
+    path("api/agents/", include("core.urls")),
     path("", login_page),
     path("login", login_page),
     path("authentication/form", authentication_form),
