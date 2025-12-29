@@ -1,29 +1,15 @@
 import os
 import json
 import requests
-import csv
-from pathlib import Path
+from dotenv import load_dotenv
 
 class QwenAPITool:
     def __init__(self, api_key=None, model=None):
+        try:
+            load_dotenv()
+        except Exception:
+            pass
         self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY", "") or os.environ.get("QWEN_API_KEY", "")
-        if not self.api_key:
-            try:
-                base = Path(__file__).resolve().parents[2]
-                p = base / "resources" / "AccessKey.csv"
-                with open(p, "r", encoding="utf-8") as f:
-                    rows = list(csv.reader(f))
-                    if len(rows) >= 2 and len(rows[1]) >= 2:
-                        ak_id = (rows[1][0] or "").strip()
-                        ak_secret = (rows[1][1] or "").strip()
-                        if ak_secret:
-                            self.api_key = ak_secret
-                            try:
-                                print("[FinMind][LLM] fallback using AccessKey.csv secret as token")
-                            except Exception:
-                                pass
-            except Exception:
-                pass
         self.model = model or os.environ.get("QWEN_MODEL", "qwen-max")
     def call(self, prompt):
         if not self.api_key:
@@ -38,7 +24,19 @@ class QwenAPITool:
         r = requests.post(url, headers=headers, json=data)
         try:
             d = r.json()
-            content = d["output"]["choices"][0]["message"]["content"]
+            content = None
+            try:
+                content = d.get("output", {}).get("choices", [{}])[0].get("message", {}).get("content")
+            except Exception:
+                pass
+            if not content:
+                content = d.get("output", {}).get("text")
+            if not content:
+                content = d.get("output", {}).get("result")
+            if not content:
+                content = d.get("output", {}).get("message", {}).get("content")
+            if not content:
+                raise ValueError("empty content")
             try:
                 print(f"[FinMind][LLM] status={r.status_code} model={self.model}")
                 print(f"[FinMind][LLM] prompt={str(prompt)[:200]}")

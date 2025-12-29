@@ -14,21 +14,6 @@ class Command(BaseCommand):
             pass
         api_key = os.environ.get("DASHSCOPE_API_KEY", "") or os.environ.get("QWEN_API_KEY", "")
         if not api_key:
-            try:
-                from pathlib import Path
-                import csv
-                base = Path(__file__).resolve().parents[3]
-                p = base / "resources" / "AccessKey.csv"
-                with open(p, "r", encoding="utf-8") as f:
-                    rows = list(csv.reader(f))
-                    if len(rows) >= 2 and len(rows[1]) >= 2:
-                        ak_secret = (rows[1][1] or "").strip()
-                        if ak_secret:
-                            api_key = ak_secret
-                            print("使用 AccessKey.csv 中的 Secret 作为令牌进行检测")
-            except Exception:
-                pass
-        if not api_key:
             print("DASHSCOPE_API_KEY 未设置")
             return
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
