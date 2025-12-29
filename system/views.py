@@ -313,6 +313,35 @@ def rule_delete(request):
     obj.delete()
     return JsonResponse({"ok": True})
 
+@csrf_exempt
+def rule_recommend(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    desc = (payload.get("desc") or payload.get("description") or "").strip()
+    if not desc:
+        return HttpResponseBadRequest("missing desc")
+    try:
+        from core.services.classification_service import classify_text
+        cid = classify_text(desc) or ""
+    except Exception:
+        cid = ""
+    cat = None
+    if cid and cid != "OTHER":
+        cat = ConsumeCategory.objects.filter(code=cid).first() or ConsumeCategory.objects.filter(id=cid).first()
+    rec = {
+        "categoryId": (cat.code if cat and cat.code else (cat.id if cat else "")) or "",
+        "categoryName": cat.name if cat else "",
+        "pattern": desc,
+        "patternType": "contains",
+        "priority": 80,
+        "tags": [desc]
+    }
+    return JsonResponse({"recommendation": rec})
+
 def _norm(s):
     try:
         s = unicodedata.normalize("NFKC", s or "")
@@ -430,8 +459,38 @@ def dashboard_coverage(request):
 
 @csrf_exempt
 def dashboard_unmatched_tops(request):
+    import time
+    t0 = time.time()
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        payload = {}
     rules = list(ConsumeRule.objects.filter(active=1).order_by('-priority', 'pattern'))
-    txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date')
+    txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date', 'bank_card_name', 'card_type_name')
+    sd = payload.get("startDate")
+    ed = payload.get("endDate")
+    bank = payload.get("bank")
+    card = payload.get("cardType")
+    if sd:
+        try:
+            from datetime import datetime
+            sdt = datetime.fromisoformat(sd)
+            txns = txns.filter(transaction_date__gte=sdt)
+        except Exception:
+            pass
+    if ed:
+        try:
+            from datetime import datetime, timedelta
+            edt = datetime.fromisoformat(ed) + timedelta(days=1)
+            txns = txns.filter(transaction_date__lt=edt)
+        except Exception:
+            pass
+    if bank:
+        txns = txns.filter(bank_card_name__icontains=bank)
+    if card:
+        txns = txns.filter(card_type_name__icontains=card)
     ids = [x.id for x in rules]
     tags_map = {}
     if ids:
@@ -459,4 +518,29 @@ def dashboard_unmatched_tops(request):
     tops = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
     tops = tops[:50]
     rows = [{"desc": samples[k], "count": v} for k, v in tops]
-    return JsonResponse({"rows": rows})
+    total = len(txn_list)
+    unmatched = sum(freq.values())
+    elapsed_ms = int((time.time() - t0) * 1000)
+    return JsonResponse({"rows": rows, "total": total, "unmatched": unmatched, "elapsedMs": elapsed_ms})
+
+@csrf_exempt
+def dashboard_unmatched_dimensions(request):
+    qs = Transaction.objects.exclude(deleted=1).only('bank_card_name', 'card_type_name', 'transaction_date')
+    try:
+        banks = sorted(list({(x.bank_card_name or "").strip() for x in qs if (x.bank_card_name or "").strip()}))
+        cards = sorted(list({(x.card_type_name or "").strip() for x in qs if (x.card_type_name or "").strip()}))
+        dates = [x.transaction_date for x in qs if x.transaction_date]
+    except Exception:
+        banks = []
+        cards = []
+        dates = []
+    date_min = None
+    date_max = None
+    try:
+        if dates:
+            ds = sorted(dates)
+            date_min = ds[0].date().isoformat()
+            date_max = ds[-1].date().isoformat()
+    except Exception:
+        pass
+    return JsonResponse({"banks": banks, "cardTypes": cards, "dateMin": date_min, "dateMax": date_max})

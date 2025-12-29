@@ -64,7 +64,7 @@
                         </div>
                     </div>
                 </div>
-                <div v-if="tab==='coverage'" class="grid-2">
+                <div v-if="tab==='coverage'" class="stack">
                     <div class="card">
                         <div class="card-title">Rule Coverage</div>
                         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px 0;">
@@ -92,9 +92,63 @@
                                 <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
                             </select>
                             <input v-model="selectedRuleIdForTag" placeholder="Rule ID for Add Tag" style="width:220px;">
-                            <button class="icon-btn" title="Reload" @click="fetchUnmatchedTops">↻</button>
+                            <button class="btn" @click="fetchUnmatchedTops" :disabled="unmatchedLoading" style="padding:8px 12px;">Compute Unmatched</button>
+                            <input v-model="unmatchedStartDate" type="date" style="width:160px;" @change="saveUnmatchedSettings">
+                            <input v-model="unmatchedEndDate" type="date" style="width:160px;" @change="saveUnmatchedSettings">
+                            <select v-model="unmatchedBank" style="width:160px;" @change="saveUnmatchedSettings">
+                                <option value="">Bank</option>
+                                <option v-for="b in unmatchedBankOptions" :key="b" :value="b">{{ b }}</option>
+                            </select>
+                            <select v-model="unmatchedCardType" style="width:160px;" @change="saveUnmatchedSettings">
+                                <option value="">Card Type</option>
+                                <option v-for="t in unmatchedCardTypeOptions" :key="t" :value="t">{{ t }}</option>
+                            </select>
+                            <input v-model="unmatchedFilter" placeholder="Search unmatched" style="width:220px;" @change="saveUnmatchedSettings">
+                            <input v-model.number="unmatchedTopN" type="number" min="1" max="200" placeholder="Top N" style="width:120px;" @change="saveUnmatchedSettings">
+                            <input v-model.number="unmatchedMinCount" type="number" min="1" placeholder="Min Count" style="width:120px;" @change="saveUnmatchedSettings">
+                            <input v-model="unmatchedIgnoreKeywords" placeholder="Ignore keywords, comma sep" style="width:220px;" @change="saveUnmatchedSettings">
+                            <select v-model.number="unmatchedPageSize" style="width:120px;">
+                                <option :value="10">Page 10</option>
+                                <option :value="20">Page 20</option>
+                                <option :value="50">Page 50</option>
+                            </select>
+                            <input v-model.number="unmatchedDefaultPriority" type="number" placeholder="Default Priority" style="width:140px;" @change="saveUnmatchedSettings">
+                            <button class="icon-btn" title="Export CSV" @click="exportUnmatchedCSV">⇩</button>
+                            <button class="toggle" @click="setDatePreset('7d')">Last 7d</button>
+                            <button class="toggle" @click="setDatePreset('30d')">30d</button>
+                            <button class="toggle" @click="setDatePreset('90d')">90d</button>
+                            <button class="toggle" @click="setDatePreset('ytd')">YTD</button>
+                            <button class="toggle" @click="clearUnmatchedResults">Clear</button>
+                            <button class="toggle" @click="recommendPage" :disabled="unmatchedBulkLoading || !paginatedUnmatchedRows.length">Recommend Page</button>
+                            <button class="toggle" @click="recommendAll" :disabled="unmatchedBulkLoading || !filteredUnmatchedRows.length">Recommend All</button>
+                            <button class="toggle" @click="saveAllRecommendations" :disabled="unmatchedBulkLoading || pendingRecommendationsCount===0">Save All</button>
+                            <button class="toggle" @click="cancelBulk" v-if="unmatchedBulkLoading">Cancel</button>
                             <span class="spacer"></span>
-                            <div style="color:var(--muted);">Pick a category to create rules quickly</div>
+                            <button class="toggle" @click="resetUnmatchedFilters">Reset Filters</button>
+                            <div v-if="unmatchedBulkProgress.action" style="display:flex; align-items:center; gap:8px;">
+                                <span style="color:var(--muted)">Bulk {{ unmatchedBulkProgress.action }} {{ unmatchedBulkProgress.done }} / {{ unmatchedBulkProgress.total }}</span>
+                                <div class="progress" style="width:160px;">
+                                    <div class="progress-fill" :style="{ width: (unmatchedBulkProgress.total ? Math.round(unmatchedBulkProgress.done / unmatchedBulkProgress.total * 100) : 0) + '%' }"></div>
+                                </div>
+                            </div>
+                            <div class="badge">Pending {{ pendingRecommendationsCount }}</div>
+                        </div>
+                        <div class="chips" style="margin-bottom:8px;">
+                            <span class="chip">Date: {{ unmatchedStartDate || '—' }} ~ {{ unmatchedEndDate || '—' }}</span>
+                            <span class="chip">Bank: {{ unmatchedBank || 'All' }}</span>
+                            <span class="chip">Card: {{ unmatchedCardType || 'All' }}</span>
+                            <span class="chip">Top N: {{ unmatchedTopN }}</span>
+                            <span class="chip">Shown: {{ filteredUnmatchedRows.length }} / {{ unmatchedRows.length }}</span>
+                        </div>
+                        <div class="row" v-if="unmatchedSummary" style="color:var(--muted); margin-bottom:8px;">
+                            <span>Processed {{ unmatchedSummary.total }} transactions</span>
+                            <span>•</span>
+                            <span>Unmatched {{ unmatchedSummary.unmatched }}</span>
+                            <span>•</span>
+                            <span>Took {{ unmatchedSummary.elapsedMs }} ms</span>
+                        </div>
+                        <div v-if="unmatchedSummary" class="progress">
+                            <div class="progress-fill" :style="{ width: (unmatchedSummary.total ? Math.round(unmatchedSummary.unmatched / unmatchedSummary.total * 100) : 0) + '%' }"></div>
                         </div>
                         <table class="table">
                             <thead>
@@ -102,19 +156,49 @@
                             </thead>
                             <tbody>
                                 <tr v-if="unmatchedLoading"><td colspan="3" style="color:var(--muted)">Loading...</td></tr>
-                                <tr v-for="row in unmatchedRows" :key="row.desc">
+                                <tr v-for="row in paginatedUnmatchedRows" :key="row.desc">
                                     <td>{{ row.desc }}</td>
                                     <td>{{ row.count }}</td>
                                     <td>
                                         <button @click="createRuleFromUnmatched(row)" :disabled="!selectedUnmatchedCategory">Create Rule</button>
                                         <button @click="addTagFromUnmatched(row)" :disabled="!selectedRuleIdForTag">Add Tag</button>
+                                        <button @click="recommendForUnmatched(row)" :disabled="row._loading">{{ row._loading ? 'Recommending...' : 'Recommend' }}</button>
+                                    </td>
+                                </tr>
+                                <tr v-for="row in recommendedUnmatched" :key="row.desc + '_reco'">
+                                    <td colspan="3">
+                                        <div class="row" style="align-items:center; gap:8px;">
+                                            <select v-model="row._reco.categoryId" style="width:240px;">
+                                                <option value="">Choose category</option>
+                                                <option v-for="c in categories" :key="c.id" :value="c.code || c.id">{{ c.name || c.code }}</option>
+                                            </select>
+                                            <input v-model="row._reco.pattern" style="flex:1" placeholder="Pattern">
+                                            <select v-model="row._reco.patternType" style="width:140px;">
+                                                <option value="contains">contains</option>
+                                                <option value="equals">equals</option>
+                                                <option value="startsWith">startsWith</option>
+                                                <option value="endsWith">endsWith</option>
+                                                <option value="regex">regex</option>
+                                            </select>
+                                            <input v-model.number="row._reco.priority" type="number" style="width:120px" placeholder="Priority">
+                                            <button @click="applyRecommendation(row)">Save</button>
+                                            <button class="toggle" @click="clearRecommendation(row)">Clear</button>
+                                        </div>
                                     </td>
                                 </tr>
                                 <tr v-if="!unmatchedRows.length && !unmatchedLoading">
                                     <td colspan="3" style="color:var(--muted);">No data</td>
                                 </tr>
+                                <tr v-else-if="unmatchedRows.length && !filteredUnmatchedRows.length">
+                                    <td colspan="3" style="color:#f59e0b;">Filtered out all results — adjust filters or Reset Filters</td>
+                                </tr>
                             </tbody>
                         </table>
+                        <div class="row" style="justify-content:flex-end; align-items:center; gap:8px;">
+                            <button class="toggle" @click="setUnmatchedPage(unmatchedPage-1)" :disabled="unmatchedPage<=1">Prev</button>
+                            <span style="color:var(--muted)">Page {{ unmatchedPage }} / {{ unmatchedTotalPages }}</span>
+                            <button class="toggle" @click="setUnmatchedPage(unmatchedPage+1)" :disabled="unmatchedPage>=unmatchedTotalPages">Next</button>
+                        </div>
                     </div>
                 </div>
                 <div v-if="tab==='assistant'" class="grid-2">

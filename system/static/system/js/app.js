@@ -1,7 +1,7 @@
 /* FinMind main app */
 (function(){
   const { createApp } = window.Vue;
-  createApp({
+  const appDef = {
     data() {
       return {
         tab: 'dashboard',
@@ -17,6 +17,25 @@
         coverageLoading: false,
         unmatchedRows: [],
         unmatchedLoading: false,
+        unmatchedSummary: null,
+        unmatchedFilter: '',
+        unmatchedTopN: 50,
+        unmatchedPage: 1,
+        unmatchedPageSize: 10,
+        unmatchedDefaultPriority: 80,
+        unmatchedMinCount: 1,
+        unmatchedIgnoreKeywords: '',
+        unmatchedAbortRequested: false,
+        unmatchedBulkProgress: { action: '', done: 0, total: 0 },
+        toastMessage: '',
+        toastKind: '',
+        unmatchedStartDate: '',
+        unmatchedEndDate: '',
+        unmatchedBank: '',
+        unmatchedCardType: '',
+        unmatchedBankOptions: [],
+        unmatchedCardTypeOptions: [],
+        unmatchedBulkLoading: false,
         selectedUnmatchedCategory: '',
         selectedRuleIdForTag: '',
         categories: [],
@@ -56,6 +75,45 @@
       this.catHoverIdx = 0;
     },
     computed: {
+      recommendedUnmatched() {
+        const rows = Array.isArray(this.unmatchedRows) ? this.unmatchedRows : [];
+        return rows.filter(r => r && r._reco);
+      },
+      pendingRecommendationsCount() {
+        const rows = Array.isArray(this.unmatchedRows) ? this.unmatchedRows : [];
+        return rows.filter(r => r && r._reco).length;
+      },
+      filteredUnmatchedRows() {
+        const rows = Array.isArray(this.unmatchedRows) ? this.unmatchedRows.slice() : [];
+        const q = (this.unmatchedFilter || '').trim().toLowerCase();
+        let vis = rows;
+        if (q) vis = vis.filter(x => (x.desc||'').toLowerCase().includes(q));
+        const minc = Math.max(1, parseInt(this.unmatchedMinCount || 1, 10));
+        vis = vis.filter(x => Number(x.count || 0) >= minc);
+        const ignores = (this.unmatchedIgnoreKeywords || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        if (ignores.length) {
+          vis = vis.filter(x => {
+            const d = (x.desc || '').toLowerCase();
+            for (let t of ignores) { if (t && d.includes(t)) return false; }
+            return true;
+          });
+        }
+        const n = parseInt(this.unmatchedTopN || 50, 10);
+        vis = vis.slice(0, Math.max(1, n));
+        return vis;
+      },
+      unmatchedTotalPages() {
+        const total = (this.filteredUnmatchedRows || []).length;
+        const size = Math.max(1, parseInt(this.unmatchedPageSize || 10, 10));
+        return Math.max(1, Math.ceil(total / size));
+      },
+      paginatedUnmatchedRows() {
+        const list = this.filteredUnmatchedRows || [];
+        const size = Math.max(1, parseInt(this.unmatchedPageSize || 10, 10));
+        const page = Math.min(Math.max(1, parseInt(this.unmatchedPage || 1, 10)), Math.max(1, Math.ceil(list.length / size)));
+        const start = (page - 1) * size;
+        return list.slice(start, start + size);
+      },
       categoryOptions() {
         const rows = (this.categories || []).slice().sort((a,b)=>{
           if (a.sortNo !== b.sortNo) return a.sortNo - b.sortNo;
@@ -167,9 +225,58 @@
         } else if (t === 'rules') {
           this.fetchCategories();
         } else if (t === 'coverage') {
-          this.fetchUnmatchedTops();
+          this.fetchCategories();
+          this.unmatchedRows = [];
+          this.unmatchedLoading = false;
+          this.fetchUnmatchedDimensions();
+          this.loadUnmatchedSettings();
         } else if (t === 'assistant') {
           // nothing extra
+        }
+      },
+      async fetchUnmatchedDimensions() {
+        try {
+          const r = await fetch('/api/dashboard/unmatched-dimensions', { method:'POST' });
+          if (r.ok) {
+            const d = await r.json();
+            this.unmatchedBankOptions = Array.isArray(d.banks) ? d.banks : [];
+            this.unmatchedCardTypeOptions = Array.isArray(d.cardTypes) ? d.cardTypes : [];
+            if (d.dateMin) this.unmatchedStartDate = d.dateMin;
+            if (d.dateMax) this.unmatchedEndDate = d.dateMax;
+          }
+        } catch(e) {}
+      },
+      async recommendForUnmatched(row) {
+        if (!row || !row.desc) return;
+        row._loading = true;
+        try {
+          const r = await fetch('/api/rule/recommend', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ desc: row.desc }) });
+          if (r.ok) {
+            const d = await r.json();
+            const rec = d.recommendation || {};
+            if (!rec.categoryId && this.selectedUnmatchedCategory) rec.categoryId = this.selectedUnmatchedCategory;
+            row._reco = rec;
+          }
+        } catch(e) {} finally {
+          row._loading = false;
+        }
+      },
+      async applyRecommendation(row) {
+        if (!row || !row._reco) return;
+        const rec = row._reco || {};
+        const cid = rec.categoryId || this.selectedUnmatchedCategory;
+        if (!cid) { alert('请选择分类'); return; }
+        const payload = {
+          categoryId: cid,
+          pattern: rec.pattern || row.desc,
+          patternType: rec.patternType || 'contains',
+          priority: rec.priority != null ? rec.priority : (this.unmatchedDefaultPriority || 80),
+          tags: Array.isArray(rec.tags) ? rec.tags : [row.desc],
+          active: 1
+        };
+        const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if (resp.ok) {
+          alert('已保存为规则');
         }
       },
       starString(p) {
@@ -272,11 +379,19 @@
       },
       async fetchUnmatchedTops() {
         this.unmatchedLoading = true;
+        this.unmatchedSummary = null;
+        this.unmatchedPage = 1;
         try {
-          const r = await fetch('/api/dashboard/unmatched-tops', { method:'POST' });
+          const r = await fetch('/api/dashboard/unmatched-tops', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            startDate: this.unmatchedStartDate || null,
+            endDate: this.unmatchedEndDate || null,
+            bank: this.unmatchedBank || null,
+            cardType: this.unmatchedCardType || null
+          }) });
           if (r.ok) {
             const d = await r.json();
             this.unmatchedRows = Array.isArray(d.rows) ? d.rows : [];
+            this.unmatchedSummary = { total: d.total || 0, unmatched: d.unmatched || 0, elapsedMs: d.elapsedMs || 0 };
           } else {
             this.unmatchedRows = [];
           }
@@ -285,6 +400,163 @@
         } finally {
           this.unmatchedLoading = false;
         }
+      },
+      setUnmatchedPage(p) {
+        const tp = this.unmatchedTotalPages;
+        const np = Math.min(Math.max(1, p), tp);
+        this.unmatchedPage = np;
+      },
+      exportUnmatchedCSV() {
+        const rows = this.filteredUnmatchedRows || [];
+        const header = ['Desc','Count'];
+        const lines = [header.join(',')].concat(rows.map(r => {
+          const desc = String(r.desc||'').replace(/"/g,'""');
+          const count = r.count || 0;
+          return `"${desc}",${count}`;
+        }));
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'unmatched_top_list.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+      async recommendPage() {
+        if (this.unmatchedBulkLoading) return;
+        const list = this.paginatedUnmatchedRows || [];
+        if (!list.length) return;
+        this.unmatchedBulkLoading = true;
+        this.unmatchedBulkProgress = { action: 'recommend', done: 0, total: list.length };
+        this.unmatchedAbortRequested = false;
+        try {
+          for (let row of list) {
+            if (this.unmatchedAbortRequested) break;
+            await this.recommendForUnmatched(row);
+            this.unmatchedBulkProgress.done++;
+          }
+        } catch(e) {} finally {
+          this.unmatchedBulkLoading = false;
+          this.unmatchedAbortRequested = false;
+          this.unmatchedBulkProgress = { action: '', done: 0, total: 0 };
+        }
+      },
+      async recommendAll() {
+        if (this.unmatchedBulkLoading) return;
+        const list = this.filteredUnmatchedRows || [];
+        if (!list.length) return;
+        this.unmatchedBulkLoading = true;
+        this.unmatchedBulkProgress = { action: 'recommend', done: 0, total: list.length };
+        this.unmatchedAbortRequested = false;
+        try {
+          for (let row of list) {
+            if (this.unmatchedAbortRequested) break;
+            await this.recommendForUnmatched(row);
+            this.unmatchedBulkProgress.done++;
+          }
+        } catch(e) {} finally {
+          this.unmatchedBulkLoading = false;
+          this.unmatchedAbortRequested = false;
+          this.unmatchedBulkProgress = { action: '', done: 0, total: 0 };
+        }
+      },
+      clearRecommendation(row) {
+        if (!row) return;
+        row._reco = null;
+      },
+      cancelBulk() {
+        this.unmatchedAbortRequested = true;
+      },
+      saveUnmatchedSettings() {
+        try {
+          const obj = {
+            startDate: this.unmatchedStartDate || '',
+            endDate: this.unmatchedEndDate || '',
+            bank: this.unmatchedBank || '',
+            cardType: this.unmatchedCardType || '',
+            topN: parseInt(this.unmatchedTopN || 50, 10),
+            pageSize: parseInt(this.unmatchedPageSize || 10, 10),
+            minCount: parseInt(this.unmatchedMinCount || 1, 10),
+            ignore: this.unmatchedIgnoreKeywords || '',
+            defaultPriority: parseInt(this.unmatchedDefaultPriority || 80, 10)
+          };
+          localStorage.setItem('fm_unmatched_settings', JSON.stringify(obj));
+        } catch(e) {}
+      },
+      loadUnmatchedSettings() {
+        try {
+          const s = localStorage.getItem('fm_unmatched_settings');
+          if (!s) return;
+          const obj = JSON.parse(s);
+          this.unmatchedStartDate = obj.startDate || this.unmatchedStartDate;
+          this.unmatchedEndDate = obj.endDate || this.unmatchedEndDate;
+          this.unmatchedBank = obj.bank || '';
+          this.unmatchedCardType = obj.cardType || '';
+          this.unmatchedTopN = obj.topN || this.unmatchedTopN;
+          this.unmatchedPageSize = obj.pageSize || this.unmatchedPageSize;
+          this.unmatchedMinCount = obj.minCount || this.unmatchedMinCount;
+          this.unmatchedIgnoreKeywords = obj.ignore || this.unmatchedIgnoreKeywords;
+          this.unmatchedDefaultPriority = obj.defaultPriority || this.unmatchedDefaultPriority;
+        } catch(e) {}
+      },
+      async saveAllRecommendations() {
+        if (this.unmatchedBulkLoading) return;
+        const list = (this.unmatchedRows || []).filter(r => r && r._reco);
+        if (!list.length) return;
+        if (!window.confirm('确认保存全部推荐吗？')) return;
+        this.unmatchedBulkLoading = true;
+        this.unmatchedBulkProgress = { action: 'save', done: 0, total: list.length };
+        this.unmatchedAbortRequested = false;
+        try {
+          for (let row of list) {
+            if (this.unmatchedAbortRequested) break;
+            await this.applyRecommendation(row);
+            this.unmatchedBulkProgress.done++;
+          }
+          alert('全部推荐已保存');
+        } catch(e) {} finally {
+          this.unmatchedBulkLoading = false;
+          this.unmatchedAbortRequested = false;
+          this.unmatchedBulkProgress = { action: '', done: 0, total: 0 };
+        }
+      },
+      setDatePreset(p) {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth()+1).padStart(2,'0');
+        const d = String(now.getDate()).padStart(2,'0');
+        const today = `${y}-${m}-${d}`;
+        if (p === '7d' || p === '30d' || p === '90d') {
+          const days = p === '7d' ? 7 : (p === '30d' ? 30 : 90);
+          const sd = new Date(now.getTime() - days*24*60*60*1000);
+          const sy = sd.getFullYear();
+          const sm = String(sd.getMonth()+1).padStart(2,'0');
+          const sdv = String(sd.getDate()).padStart(2,'0');
+          this.unmatchedStartDate = `${sy}-${sm}-${sdv}`;
+          this.unmatchedEndDate = today;
+        } else if (p === 'ytd') {
+          const sy = y;
+          this.unmatchedStartDate = `${sy}-01-01`;
+          this.unmatchedEndDate = today;
+        }
+        this.saveUnmatchedSettings();
+      },
+      clearUnmatchedResults() {
+        this.unmatchedRows = [];
+        this.unmatchedSummary = null;
+        this.unmatchedPage = 1;
+      },
+      resetUnmatchedFilters() {
+        this.unmatchedFilter = '';
+        this.unmatchedTopN = 50;
+        this.unmatchedMinCount = 1;
+        this.unmatchedIgnoreKeywords = '';
+        this.unmatchedPageSize = 10;
+        this.unmatchedBank = '';
+        this.unmatchedCardType = '';
+        this.saveUnmatchedSettings();
       },
       async createRuleFromUnmatched(row) {
         if (!row || !row.desc || !this.selectedUnmatchedCategory) return;
@@ -656,5 +928,10 @@
     mounted() {
       this.switchTab(this.tab);
     }
-  }).mount('#app');
+  };
+  const vm = createApp(appDef).mount('#app');
+  try {
+    window.__fm_app = vm;
+    window.switchTab = function(t){ try{ window.__fm_app && window.__fm_app.switchTab && window.__fm_app.switchTab(t); }catch(e){} };
+  } catch(e) {}
 })(); 
