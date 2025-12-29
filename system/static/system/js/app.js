@@ -160,6 +160,18 @@
       }
     },
     methods: {
+      switchTab(t) {
+        this.tab = t;
+        if (t === 'dashboard') {
+          this.loadDashboard();
+        } else if (t === 'rules') {
+          this.fetchCategories();
+        } else if (t === 'coverage') {
+          this.fetchUnmatchedTops();
+        } else if (t === 'assistant') {
+          // nothing extra
+        }
+      },
       starString(p) {
         const n = p >= 90 ? 5 : p >= 70 ? 4 : p >= 50 ? 3 : p >= 30 ? 2 : 1;
         return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(n);
@@ -642,9 +654,7 @@
       }
     },
     mounted() {
-      this.loadDashboard();
-      this.fetchCategories();
-      this.fetchUnmatchedTops();
+      this.switchTab(this.tab);
     }
   }).mount('#app');
 })(); 
