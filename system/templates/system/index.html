@@ -160,12 +160,12 @@
                                     <td>{{ row.desc }}</td>
                                     <td>{{ row.count }}</td>
                                     <td>
-                                        <button @click="createRuleFromUnmatched(row)" :disabled="!selectedUnmatchedCategory">Create Rule</button>
-                                        <button @click="addTagFromUnmatched(row)" :disabled="!selectedRuleIdForTag">Add Tag</button>
-                                        <button @click="recommendForUnmatched(row)" :disabled="row._loading">{{ row._loading ? 'Recommending...' : 'Recommend' }}</button>
+                                        <button @click="openCreateRuleModal(row)" :title="!selectedUnmatchedCategory ? '未选择分类也可使用推荐' : ''">Create Rule</button>
+                                        <button @click="addTagFromUnmatched(row)" :disabled="!selectedRuleIdForTag || !selectedUnmatchedCategory" :title="!selectedUnmatchedCategory ? '请选择分类' : (!selectedRuleIdForTag ? '请输入规则ID' : '')">Add Tag</button>
+                                        <button @click="recommendForUnmatched(row)" :disabled="row._loading" :title="row._loading ? '正在生成推荐' : ''">{{ row._loading ? 'Recommending...' : 'Recommend' }}</button>
                                     </td>
                                 </tr>
-                                <tr v-for="row in recommendedUnmatched" :key="row.desc + '_reco'">
+                                <tr v-for="row in paginatedUnmatchedRows" :key="row.desc + '_edit'" v-if="row && row._reco">
                                     <td colspan="3">
                                         <div class="row" style="align-items:center; gap:8px;">
                                             <select v-model="row._reco.categoryId" style="width:240px;">
@@ -194,6 +194,53 @@
                                 </tr>
                             </tbody>
                         </table>
+                        <div v-if="createModalVisible" class="modal">
+                            <div class="modal-body">
+                                <div class="modal-title">Create Rule — Recommendation</div>
+                                <div class="form-grid" style="margin-top:8px;">
+                                    <div class="label">Source</div><div class="field field-compact"><input :value="createModalPattern" disabled></div>
+                                    <div class="label">Keywords</div><div class="field field-compact"><input v-model="createModalTags" placeholder="comma separated"></div>
+                                    <div class="label">Candidates</div>
+                                    <div class="field field-compact">
+                                        <div class="chips-list" v-if="(createModalRow && createModalRow._cands || []).length">
+                                            <div v-for="c in createModalRow._cands" :key="c.categoryId" class="chip" style="cursor:pointer;">
+                                                <label>
+                                                    <input type="radio" v-model="createModalCategoryId" :value="c.categoryId">
+                                                    <span style="margin-left:6px">{{ c.categoryName }}</span>
+                                                </label>
+                                                <div class="progress" style="width:80px; margin-left:8px;">
+                                                    <div class="progress-fill" :style="{ width: Math.min(100, c.score) + '%' }"></div>
+                                                </div>
+                                                <button class="toggle" style="margin-left:8px;" @click="chooseCandidate(c)">Use</button>
+                                            </div>
+                                        </div>
+                                        <div v-else style="color:var(--muted)">No candidates — pick manually</div>
+                                    </div>
+                                    <div class="label">Category</div><div class="field field-compact">
+                                        <select v-model="createModalCategoryId">
+                                            <option value="">Pick manually</option>
+                                            <option v-for="c in categories" :key="c.id" :value="c.code || c.id">{{ c.name || c.code }}</option>
+                                        </select>
+                                    </div>
+                                    <div class="label">Pattern</div><div class="field field-compact"><input v-model="createModalPattern"></div>
+                                    <div class="label">Type</div><div class="field field-compact">
+                                        <select v-model="createModalPatternType">
+                                            <option value="contains">contains</option>
+                                            <option value="equals">equals</option>
+                                            <option value="startsWith">startsWith</option>
+                                            <option value="endsWith">endsWith</option>
+                                            <option value="regex">regex</option>
+                                        </select>
+                                    </div>
+                                    <div class="label">Priority</div><div class="field field-compact"><input v-model.number="createModalPriority" type="number"></div>
+                                </div>
+                                <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
+                                    <button class="toggle" @click="closeCreateRuleModal">Cancel</button>
+                                    <button class="toggle" @click="confirmCreateRuleNext">Save & Next</button>
+                                    <button class="btn" @click="confirmCreateRule">Save Rule</button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="row" style="justify-content:flex-end; align-items:center; gap:8px;">
                             <button class="toggle" @click="setUnmatchedPage(unmatchedPage-1)" :disabled="unmatchedPage<=1">Prev</button>
                             <span style="color:var(--muted)">Page {{ unmatchedPage }} / {{ unmatchedTotalPages }}</span>

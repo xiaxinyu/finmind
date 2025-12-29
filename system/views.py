@@ -329,9 +329,98 @@ def rule_recommend(request):
         cid = classify_text(desc) or ""
     except Exception:
         cid = ""
+    # map LLM output to category (code/id/name contains)
     cat = None
-    if cid and cid != "OTHER":
-        cat = ConsumeCategory.objects.filter(code=cid).first() or ConsumeCategory.objects.filter(id=cid).first()
+    try:
+        if cid and cid != "OTHER":
+            cat = ConsumeCategory.objects.filter(code=cid).first() or ConsumeCategory.objects.filter(id=cid).first()
+            if not cat:
+                cat = ConsumeCategory.objects.filter(name__icontains=cid).first()
+    except Exception:
+        cat = None
+    # build candidates from rule-based matching
+    def _norm_text(s):
+        try:
+            import unicodedata, re as _re
+            s = unicodedata.normalize("NFKC", s or "")
+        except Exception:
+            s = s or ""
+        s = s.strip().lower()
+        import re
+        s = re.sub(r"\s+", " ", s)
+        return s
+    def _match_text(rule, text):
+        pt = rule.patternType or "contains"
+        pat = _norm_text(rule.pattern or "")
+        if not pat:
+            return False
+        t = _norm_text(text or "")
+        if pt == "contains":
+            return pat in t
+        if pt == "equals":
+            return pat == t
+        if pt == "startsWith":
+            return t.startswith(pat)
+        if pt == "endsWith":
+            return t.endswith(pat)
+        if pt == "regex":
+            try:
+                import re
+                return re.search(rule.pattern or "", text or "") is not None
+            except Exception:
+                return False
+        return False
+    rules = list(ConsumeRule.objects.filter(active=1).only("categoryId","pattern","patternType","priority"))
+    score_map = {}
+    count_map = {}
+    for r in rules:
+        try:
+            ok = _match_text(r, desc)
+        except Exception:
+            ok = False
+        if ok:
+            cid_key = r.categoryId or ""
+            if not cid_key:
+                continue
+            base = int(r.priority or 100)
+            bonus = 60
+            pt = (r.patternType or "contains").lower()
+            if pt == "equals":
+                bonus = 100
+            elif pt == "regex":
+                bonus = 90
+            elif pt in ("startswith","endswith"):
+                bonus = 80
+            score_map[cid_key] = score_map.get(cid_key, 0) + base + bonus
+            count_map[cid_key] = count_map.get(cid_key, 0) + 1
+    # include LLM candidate
+    llm_key = None
+    if cat and (cat.code or cat.id):
+        llm_key = cat.code or cat.id
+        score_map[llm_key] = score_map.get(llm_key, 0) + 120  # boost
+        count_map[llm_key] = count_map.get(llm_key, 0)
+    # remove "Other" codes
+    others = set(list(ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)) + list(ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)))
+    for k in list(score_map.keys()):
+        if k in others:
+            score_map.pop(k, None)
+            count_map.pop(k, None)
+    # build candidates list
+    keys = sorted(score_map.keys(), key=lambda k: score_map.get(k, 0), reverse=True)
+    keys = keys[:5]
+    candidates = []
+    for k in keys:
+        cc = ConsumeCategory.objects.filter(code=k).first() or ConsumeCategory.objects.filter(id=k).first()
+        if not cc:
+            continue
+        candidates.append({
+            "categoryId": cc.code or cc.id,
+            "categoryName": cc.name or (cc.code or ""),
+            "score": int(score_map.get(k, 0)),
+            "matches": int(count_map.get(k, 0)),
+            "source": "llm" if (llm_key and k == llm_key) else "rule"
+        })
+    # recommendation payload
     rec = {
         "categoryId": (cat.code if cat and cat.code else (cat.id if cat else "")) or "",
         "categoryName": cat.name if cat else "",
@@ -340,7 +429,7 @@ def rule_recommend(request):
         "priority": 80,
         "tags": [desc]
     }
-    return JsonResponse({"recommendation": rec})
+    return JsonResponse({"recommendation": rec, "candidates": candidates})
 
 def _norm(s):
     try:

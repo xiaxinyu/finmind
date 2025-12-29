@@ -38,6 +38,13 @@
         unmatchedBulkLoading: false,
         selectedUnmatchedCategory: '',
         selectedRuleIdForTag: '',
+        createModalVisible: false,
+        createModalRow: null,
+        createModalCategoryId: '',
+        createModalPattern: '',
+        createModalPatternType: 'contains',
+        createModalPriority: 80,
+        createModalTags: '',
         categories: [],
         ruleSearch: '',
         selectedCategoryId: '',
@@ -256,10 +263,79 @@
             const rec = d.recommendation || {};
             if (!rec.categoryId && this.selectedUnmatchedCategory) rec.categoryId = this.selectedUnmatchedCategory;
             row._reco = rec;
+            row._cands = Array.isArray(d.candidates) ? d.candidates : [];
           }
         } catch(e) {} finally {
           row._loading = false;
         }
+      },
+      openCreateRuleModal(row) {
+        if (!row || !row.desc) return;
+        this.createModalRow = row;
+        this.createModalVisible = true;
+        this.createModalPattern = row.desc || '';
+        this.createModalPatternType = 'contains';
+        this.createModalPriority = this.unmatchedDefaultPriority || 80;
+        this.createModalTags = row.desc || '';
+        this.createModalCategoryId = this.selectedUnmatchedCategory || '';
+        this.recommendForUnmatched(row).then(()=>{
+          const rec = (row && row._reco) || {};
+          if (rec.categoryId) this.createModalCategoryId = rec.categoryId;
+          if (rec.pattern) this.createModalPattern = rec.pattern;
+          if (rec.patternType) this.createModalPatternType = rec.patternType;
+          if (rec.priority != null) this.createModalPriority = rec.priority;
+          if (Array.isArray(rec.tags) && rec.tags.length) this.createModalTags = rec.tags.join(', ');
+          const cands = Array.isArray(row._cands) ? row._cands : [];
+          if (!this.createModalCategoryId && cands.length) this.createModalCategoryId = cands[0].categoryId;
+        });
+      },
+      closeCreateRuleModal() {
+        this.createModalVisible = false;
+        this.createModalRow = null;
+      },
+      async confirmCreateRule() {
+        const cid = this.createModalCategoryId || '';
+        if (!cid) { alert('请选择分类'); return; }
+        const pattern = (this.createModalPattern || '').trim();
+        if (!pattern) { alert('请输入规则Pattern'); return; }
+        try {
+          const rl = await fetch('/api/rule/list', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ categoryId: cid }) });
+          let exists = false;
+          if (rl.ok) {
+            const d = await rl.json();
+            const rules = Array.isArray(d.rows) ? d.rows : [];
+            exists = rules.some(x => (x.pattern || '') === pattern);
+          }
+          if (exists && !window.confirm('该分类已存在相同Pattern，仍要保存吗？')) return;
+        } catch(e) {}
+        const payload = {
+          categoryId: cid,
+          pattern,
+          patternType: this.createModalPatternType || 'contains',
+          priority: parseInt(this.createModalPriority || 80, 10),
+          tags: (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean),
+          active: 1
+        };
+        const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if (r.ok) {
+          this.closeCreateRuleModal();
+          alert('Rule created');
+        }
+      },
+      chooseCandidate(c) {
+        if (!c) return;
+        this.createModalCategoryId = c.categoryId || this.createModalCategoryId;
+        const sc = parseInt(c.score || 0, 10);
+        const p = Math.min(100, Math.max(60, Math.round(sc / 2)));
+        this.createModalPriority = p;
+      },
+      async confirmCreateRuleNext() {
+        const cur = this.createModalRow;
+        await this.confirmCreateRule();
+        const list = this.filteredUnmatchedRows || [];
+        const idx = list.findIndex(x => x === cur);
+        const next = list[idx+1];
+        if (next) this.openCreateRuleModal(next);
       },
       async applyRecommendation(row) {
         if (!row || !row._reco) return;
@@ -559,7 +635,8 @@
         this.saveUnmatchedSettings();
       },
       async createRuleFromUnmatched(row) {
-        if (!row || !row.desc || !this.selectedUnmatchedCategory) return;
+        if (!row || !row.desc) return;
+        if (!this.selectedUnmatchedCategory) { alert('请选择分类'); return; }
         const payload = { categoryId: this.selectedUnmatchedCategory, pattern: row.desc, patternType: 'contains', priority: 70, active: 1 };
         const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         if (r.ok) {
@@ -567,7 +644,9 @@
         }
       },
       async addTagFromUnmatched(row) {
-        if (!row || !row.desc || !this.selectedRuleIdForTag || !this.selectedUnmatchedCategory) return;
+        if (!row || !row.desc) return;
+        if (!this.selectedUnmatchedCategory) { alert('请选择分类'); return; }
+        if (!this.selectedRuleIdForTag) { alert('请输入要添加标签的规则ID'); return; }
         try {
           const rl = await fetch('/api/rule/list', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ categoryId:this.selectedUnmatchedCategory }) });
           if (!rl.ok) return;
