@@ -44,24 +44,11 @@
         <div class="pane-header">
             Rules
             <span v-if="selectedCategoryName" class="text-muted" style="font-weight:normal; font-size:13px; margin-left:auto;">{{ selectedCategoryName }} ({{ selectedCategoryCode }})</span>
+            <button class="icon-btn" title="Add Rule" @click="openAddRuleModal">＋</button>
         </div>
-        <div class="toolbar" style="flex-direction: column; align-items: stretch; gap: 8px;">
-            <div style="display:flex; gap:8px;">
-                <input v-model="newRule.pattern" placeholder="New pattern..." @keyup.enter="quickAddRule" style="flex:2;">
-                <select v-model="newRule.patternType" style="flex:1;">
-                    <option value="contains">contains</option>
-                    <option value="equals">equals</option>
-                    <option value="startsWith">starts</option>
-                    <option value="endsWith">ends</option>
-                    <option value="regex">regex</option>
-                </select>
-                <input v-model.number="newRule.priority" type="number" placeholder="Pri" style="width:60px;">
-                <button @click="quickAddRule">Add</button>
-            </div>
-            <div style="display:flex; gap:8px;">
+        <div class="toolbar" style="display:flex; gap:8px;">
                 <input v-model="ruleFilter" placeholder="Filter rules..." style="flex:1;">
                 <button :class="['switch', activeOnly ? 'switch-on' : '']" @click="toggleActiveOnly" style="width:auto;">{{ activeOnly ? 'Active Only' : 'All Rules' }}</button>
-            </div>
         </div>
         <div class="table-container">
             <table class="table">

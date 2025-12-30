@@ -1,23 +1,27 @@
 {% verbatim %}
 <div v-if="tab==='coverage'" class="layout-v">
-    <div class="stats-panel">
-        <div class="stats-item">
-            <span class="label">Rule Coverage</span>
-            <span class="value" :style="{color: (coverageResult && coverageResult.rate >= 80) ? 'var(--accent)' : 'var(--text)'}">
-                {{ coverageResult ? coverageResult.rate : '—' }}<small>%</small>
-            </span>
+        <div class="stats-panel">
+            <div class="stats-item">
+                <span class="label">Rule Coverage</span>
+                <span class="value" :style="{color: (coverageResult && coverageResult.rate >= 80) ? 'var(--accent)' : 'var(--text)'}">
+                    {{ coverageResult ? coverageResult.rate : '—' }}<small>%</small>
+                </span>
+                <div class="mini-progress" style="margin-top:6px; width:160px;">
+                    <div class="fill" :style="{ width: (coverageResult ? Math.max(0, Math.min(100, coverageResult.rate||0)) : 0) + '%' }"></div>
+                </div>
+            </div>
+            <div class="stats-item">
+                <span class="label">Matches / Total</span>
+                <span class="value">
+                    {{ coverageResult ? coverageResult.covered : '—' }} <small>/ {{ coverageResult ? coverageResult.total : '—' }}</small>
+                </span>
+            </div>
+            <div class="actions">
+            <button class="primary" @click="runFullAnalysis" :disabled="coverageLoading || unmatchedLoading">
+                {{ (coverageLoading || unmatchedLoading) ? 'Analyzing...' : 'Run Analysis' }}
+            </button>
+            </div>
         </div>
-        <div class="stats-item">
-            <span class="label">Matches / Total</span>
-            <span class="value">
-                {{ coverageResult ? coverageResult.covered : '—' }} <small>/ {{ coverageResult ? coverageResult.total : '—' }}</small>
-            </span>
-        </div>
-        <div style="flex:1"></div>
-        <button class="btn" @click="calculateCoverage" :disabled="coverageLoading">
-            {{ coverageLoading ? 'Calculating...' : 'Recalculate Coverage' }}
-        </button>
-    </div>
 
     <div class="pane flex-1" style="flex:1; display:flex; flex-direction:column; min-height:0;">
         <div class="pane-header">
@@ -26,18 +30,39 @@
                 <span v-if="unmatchedSummary">Found {{ unmatchedSummary.unmatched }} unmatched items ({{ unmatchedSummary.elapsedMs }}ms)</span>
             </div>
         </div>
-        
-        <div class="toolbar" style="flex-wrap:wrap; gap:4px; padding:8px 16px;">
-            <div class="toolbar-group">
-                <select v-model="selectedUnmatchedCategory" style="width:160px;" title="Target Category for actions">
-                    <option value="">Target Category...</option>
-                    <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
-                </select>
-                <input v-model="selectedRuleIdForTag" placeholder="Rule ID (Tag)" style="width:100px;">
-            </div>
+
+        <div class="toolbar" style="flex-wrap:nowrap; gap:6px; padding:8px 16px; overflow-x:auto;">
             
             <div class="toolbar-group">
-                <button class="btn" @click="fetchUnmatchedTops" :disabled="unmatchedLoading">Run Analysis</button>
+                <button class="btn" @click="runFullAnalysis" :disabled="coverageLoading || unmatchedLoading">Run Analysis</button>
+            </div>
+
+            <div class="toolbar-group" style="margin-left:8px;">
+                <span style="color:var(--muted); font-size:12px; font-weight:600;">Category</span>
+                <div class="dropdown" style="width:280px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div class="chip" @click="coveragePickerOpen = !coveragePickerOpen" :title="selectedUnmatchedCategoryLabel">{{ selectedUnmatchedCategoryLabel }}</div>
+                        <span class="chip" @click="coverageSelectAll()" title="All Categories">All</span>
+                    </div>
+                    <div class="dropdown-list" v-if="coveragePickerOpen">
+                        <div style="display:flex; align-items:center; gap:8px; padding:8px;">
+                            <input class="dropdown-input" v-model="coverageCategoryQuery" placeholder="Search categories..." style="flex:1;">
+                            <button class="icon-btn" @click="coveragePickerOpen=false" title="Close">×</button>
+                        </div>
+                        <div style="max-height:240px; overflow:auto; border-top:1px solid var(--border);">
+                            <div class="tree-item"
+                                 v-for="c in coverageVisibleCategories"
+                                 :key="c.id"
+                                 :style="{ paddingLeft: ((c.level||0) * 14) + 'px' }"
+                                 :class="{ active: selectedUnmatchedCategory === c.id }"
+                                 @click="coveragePickCategory(c)">
+                                <span class="caret" :class="{ hidden: !coverageHasChildren(c) }" @click.stop="coverageToggleExpand(c)">{{ coverageIsExpanded(c) ? '▾' : '▸' }}</span>
+                                <span class="code" v-html="highlightText(c.code, coverageCategoryQuery)"></span>
+                                <span class="name" v-html="highlightText(c.name, coverageCategoryQuery)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="toolbar-group">
@@ -58,13 +83,32 @@
             </div>
 
             <div class="toolbar-group">
-                <input v-model="unmatchedFilter" placeholder="Filter result..." style="width:120px;" @change="saveUnmatchedSettings">
-                <input v-model.number="unmatchedTopN" type="number" min="1" max="500" placeholder="Top N" style="width:60px;" @change="saveUnmatchedSettings" title="Top N">
-                <input v-model.number="unmatchedMinCount" type="number" min="1" placeholder="Min#" style="width:50px;" @change="saveUnmatchedSettings" title="Min Count">
+                <input v-model="unmatchedFilter" placeholder="Filter result..." style="width:140px;" @change="saveUnmatchedSettings">
             </div>
 
             <div class="toolbar-group">
-                <input v-model="unmatchedIgnoreKeywords" placeholder="Ignore keywords..." style="width:110px;" @change="saveUnmatchedSettings" title="Comma separated keywords to ignore">
+                <div class="dropdown" style="width:auto;">
+                    <button class="toggle" @click="coverageAdvancedOpen = !coverageAdvancedOpen">More</button>
+                    <div class="dropdown-list" v-if="coverageAdvancedOpen" style="width:300px;">
+                        <div style="padding:8px; display:flex; flex-direction:column; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="color:var(--muted); width:70px;">Top N</label>
+                                <input v-model.number="unmatchedTopN" type="number" min="1" max="500" style="width:100px;" @change="saveUnmatchedSettings">
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="color:var(--muted); width:70px;">Min#</label>
+                                <input v-model.number="unmatchedMinCount" type="number" min="1" style="width:100px;" @change="saveUnmatchedSettings">
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="color:var(--muted); width:70px;">Ignore</label>
+                                <input v-model="unmatchedIgnoreKeywords" placeholder="Comma separated" style="flex:1;" @change="saveUnmatchedSettings">
+                            </div>
+                            <div style="display:flex; justify-content:flex-end;">
+                                <button class="toggle" @click="coverageAdvancedOpen=false">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <div style="flex:1"></div>
@@ -76,6 +120,8 @@
                 <button class="toggle" @click="resetUnmatchedFilters">Reset</button>
             </div>
         </div>
+
+        
 
         <!-- Progress Bar -->
          <div v-if="unmatchedBulkLoading || unmatchedBulkProgress.action" style="background:var(--panel); padding:0 16px 8px; border-bottom:1px solid var(--border);">
@@ -106,10 +152,9 @@
                             <td>
                                 <div class="action-group">
                                     <button class="btn-xs" @click="openCreateRuleModal(row)" title="Create Rule">+ Rule</button>
-                                    <button class="btn-xs secondary" @click="addTagFromUnmatched(row)" :disabled="!selectedRuleIdForTag || !selectedUnmatchedCategory" title="Add Tag">+ Tag</button>
-                                    <button class="btn-xs secondary" @click="recommendForUnmatched(row)" :disabled="row._loading">
-                                        {{ row._loading ? '...' : 'Auto' }}
-                                    </button>
+                <button class="btn-xs secondary" @click="recommendForUnmatched(row)" :disabled="row._loading">
+                    {{ row._loading ? '...' : 'Auto' }}
+                </button>
                                 </div>
                             </td>
                         </tr>
@@ -158,99 +203,5 @@
         </div>
     </div>
     
-    <!-- Modal kept inside the coverage div -->
-    <div v-if="createModalVisible" class="modal">
-        <div class="modal-body modal-body-wide">
-            <div class="modal-title">Create Rule — Recommendation</div>
-            <div class="modal-split">
-                <div class="modal-left">
-                    <div class="form-group">
-                        <label>Source</label>
-                        <input :value="createModalPattern" disabled class="full-width">
-                    </div>
-                    <div class="form-group">
-                        <label>Keywords</label>
-                        <input v-model="createModalTags" placeholder="comma separated" class="full-width">
-                        <div class="chips-list" v-if="createModalTokens.length" style="margin-top:6px;">
-                            <span class="chip" v-for="t in createModalTokens" :key="t">
-                                <span @click="toggleKeywordChip(t)" style="cursor:pointer">{{ t }}</span>
-                                <button class="icon-btn-tiny" @click="setPatternFromToken(t)" title="Set as Pattern">P</button>
-                            </span>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Candidates</label>
-                        <div class="candidates-list">
-                            <div v-if="(createModalRow && createModalRow._cands || []).length">
-                                <div v-for="c in createModalRow._cands" :key="c.categoryId" 
-                                     class="candidate-item" 
-                                     :class="{ selected: createModalCategoryId === c.categoryId }"
-                                     @click="chooseCandidate(c)">
-                                    <div>
-                                        <div style="font-weight:600">{{ c.categoryName }}</div>
-                                        <div style="font-size:11px; color:var(--muted)">Score: {{ c.score }} (Matches: {{ c.matches }})</div>
-                                    </div>
-                                    <div class="progress" style="width:60px; height:6px; margin:0;">
-                                        <div class="progress-fill" :style="{ width: Math.min(100, c.score) + '%' }"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div v-else style="color:var(--muted); font-size:12px; padding:8px; text-align:center; border:1px dashed var(--border); border-radius:8px;">
-                                No candidates — pick from tree
-                            </div>
-                        </div>
-                    </div>
-                    <div v-if="createModalCategoryId" class="form-group" style="background:var(--bg); padding:8px 10px; border:1px solid var(--accent); border-radius:8px; margin-top:8px;">
-                        <div style="font-size:11px; color:var(--muted)">Selected Category</div>
-                        <div style="font-weight:600; color:var(--accent); font-size:13px; margin-top:2px;">{{ createModalCategoryName }}</div>
-                    </div>
-                    <div style="height:1px; background:var(--border); margin:16px 0;"></div>
-                    <div class="form-group">
-                        <label>Pattern</label>
-                        <input v-model="createModalPattern" class="full-width">
-                    </div>
-                    <div class="row" style="gap:12px;">
-                        <div class="form-group" style="flex:1">
-                            <label>Type</label>
-                            <select v-model="createModalPatternType" class="full-width">
-                                <option value="contains">contains</option>
-                                <option value="equals">equals</option>
-                                <option value="startsWith">startsWith</option>
-                                <option value="endsWith">endsWith</option>
-                                <option value="regex">regex</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="flex:1">
-                            <label>Priority</label>
-                            <input v-model.number="createModalPriority" type="number" class="full-width">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-right">
-                    <div class="form-group" style="height:100%; display:flex; flex-direction:column;">
-                        <label>Category Tree</label>
-                        <input v-model="modalCategoryQuery" placeholder="Search categories..." class="full-width" style="margin-bottom:8px;">
-                        <div class="tree-wrapper">
-                            <div class="tree-item"
-                                 v-for="c in modalVisibleCategories"
-                                 :key="c.id"
-                                 :style="{ paddingLeft: ((c.level||0) * 14) + 'px' }"
-                                 :class="{ active: createModalCategoryId === (c.code||c.id) }"
-                                 @click="modalPickCategory(c)">
-                                <span class="caret" :class="{ hidden: !modalHasChildren(c) }" @click.stop="modalToggleExpand(c)">{{ modalIsExpanded(c) ? '▾' : '▸' }}</span>
-                                <span class="code" v-html="highlightText(c.code, modalCategoryQuery)"></span>
-                                <span class="name" v-html="highlightText(c.name, modalCategoryQuery)"></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="toggle" @click="closeCreateRuleModal">Cancel</button>
-                <button class="toggle" @click="confirmCreateRuleNext">Save & Next</button>
-                <button class="btn" @click="confirmCreateRule">Save Rule</button>
-            </div>
-        </div>
-    </div>
 </div>
 {% endverbatim %}

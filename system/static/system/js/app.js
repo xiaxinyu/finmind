@@ -53,6 +53,14 @@
         createModalTokens: [],
         modalExpanded: {},
         modalCategoryQuery: '',
+        coverageCategoryQuery: '',
+        coverageCatOpen: false,
+        coverageCatHoverIdx: 0,
+        createModalFullscreen: false,
+        recentCategoryIds: [],
+        coverageExpanded: {},
+        coveragePickerOpen: false,
+        coverageAdvancedOpen: false,
         categories: [],
         ruleSearch: '',
         selectedCategoryId: '',
@@ -266,9 +274,61 @@
         const set = new Set();
         (this.rules||[]).forEach(r => { if (r.cardTypeCode) set.add(r.cardTypeCode); });
         return Array.from(set).sort();
+      },
+      recentCategories() {
+        const dict = {};
+        (this.categories||[]).forEach(c => { dict[c.id] = `${c.code||''} ${c.name||''}`.trim(); });
+        return (this.recentCategoryIds||[]).map(id => ({ id, label: dict[id] || id }));
+      },
+      coverageRecommendedCategories() {
+        const list = (this.categories||[]).slice();
+        const counts = this.countsMap || {};
+        const scored = list.map(c => ({ id: c.id, label: `${c.code||''} ${c.name||''}`.trim(), score: counts[c.code] || 0 }));
+        scored.sort((a,b)=> b.score - a.score);
+        return scored.filter(x => x.score > 0).slice(0, 6);
+      },
+      selectedUnmatchedCategoryLabel() {
+        if (!this.selectedUnmatchedCategory) return 'All';
+        const c = (this.categories||[]).find(x => x.id === this.selectedUnmatchedCategory);
+        return c ? `${c.code||''} ${c.name||''}`.trim() : this.selectedUnmatchedCategory;
+      },
+      coverageVisibleCategories() {
+        const all = (this.categories || []).slice();
+        const byParent = {};
+        all.forEach(c => {
+          const pid = c.parentId || '';
+          if (!byParent[pid]) byParent[pid] = [];
+          byParent[pid].push(c);
+        });
+        Object.keys(byParent).forEach(pid => {
+          byParent[pid].sort((a,b) => {
+            if ((a.sortNo||0) !== (b.sortNo||0)) return (a.sortNo||0) - (b.sortNo||0);
+            return (a.code||'').localeCompare(b.code||'');
+          });
+        });
+        const roots = (byParent[''] || all.filter(c => !c.parentId)).sort((a,b)=>{
+          if ((a.sortNo||0) !== (b.sortNo||0)) return (a.sortNo||0) - (b.sortNo||0);
+          return (a.code||'').localeCompare(b.code||'');
+        });
+        const out = [];
+        const pushNode = (node) => {
+          out.push(node);
+          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []);
+          if (this.coverageExpanded[node.id]) {
+            children.forEach(ch => pushNode(ch));
+          }
+        };
+        roots.forEach(r => pushNode(r));
+        const q = (this.coverageCategoryQuery || '').trim().toLowerCase();
+        if (!q) return out;
+        return out.filter(c => (c.name||'').toLowerCase().includes(q) || (c.code||'').toLowerCase().includes(q));
       }
     },
     methods: {
+      async runFullAnalysis() {
+        await this.calculateCoverage();
+        await this.fetchUnmatchedTops();
+      },
       switchTab(t) {
         this.tab = t;
         if (t === 'dashboard') {
@@ -276,7 +336,14 @@
         } else if (t === 'rules') {
           this.fetchCategories();
         } else if (t === 'coverage') {
-          this.fetchCategories();
+          this.fetchCategories().then(async ()=>{
+            await this.fetchCategoryRuleCounts();
+            this.coverageCategoryQuery = '';
+            if (!this.selectedUnmatchedCategory) {
+              this.coverageCatOpen = true;
+              this.coverageCatHoverIdx = 0;
+            }
+          });
           this.unmatchedRows = [];
           this.unmatchedLoading = false;
           this.fetchUnmatchedDimensions();
@@ -296,6 +363,75 @@
             if (d.dateMax) this.unmatchedEndDate = d.dateMax;
           }
         } catch(e) {}
+      },
+      coverageCategoryOptions() {
+        const rows = (this.categories || []).slice().sort((a,b)=>{
+          if ((a.sortNo||0) !== (b.sortNo||0)) return (a.sortNo||0) - (b.sortNo||0);
+          return (a.code||'').localeCompare(b.code||'');
+        });
+        return rows.map(c => ({ id: c.id, label: `${c.code || ''} ${c.name || ''}`.trim() }));
+      },
+      filteredCoverageCategoryOptions() {
+        const q = (this.coverageCategoryQuery || '').trim().toLowerCase();
+        const opts = this.coverageCategoryOptions;
+        if (!q) {
+          const rec = this.coverageRecommendedCategories || [];
+          if (rec.length) return rec;
+          return opts.slice(0, 20);
+        }
+        return opts.filter(o => o.label.toLowerCase().includes(q));
+      },
+      onCoverageCategoryQueryKeydown(e) {
+        const list = this.filteredCoverageCategoryOptions || [];
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.coverageCatOpen = true;
+          this.coverageCatHoverIdx = Math.min(list.length - 1, (this.coverageCatHoverIdx || 0) + 1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.coverageCatOpen = true;
+          this.coverageCatHoverIdx = Math.max(0, (this.coverageCatHoverIdx || 0) - 1);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const opt = list[this.coverageCatHoverIdx || 0] || list[0];
+          if (opt) this.pickCoverageCategory(opt);
+        } else if (e.key === 'Escape') {
+          this.coverageCatOpen = false;
+        }
+      },
+      coverageHasChildren(c) {
+        if (!c || !c.id) return false;
+        return (this.categories || []).some(x => x.parentId === c.id || x.parentId === c.code);
+      },
+      coverageIsExpanded(c) {
+        return !!this.coverageExpanded[c.id];
+      },
+      coverageToggleExpand(c) {
+        if (!this.coverageHasChildren(c)) return;
+        const cur = !!this.coverageExpanded[c.id];
+        this.coverageExpanded[c.id] = !cur;
+      },
+      coverageSelectAll() {
+        this.selectedUnmatchedCategory = '';
+        this.coverageCategoryQuery = '';
+        this.coverageCatOpen = false;
+        this.coveragePickerOpen = false;
+      },
+      coveragePickCategory(c) {
+        if (!c) return;
+        this.selectedUnmatchedCategory = c.id;
+        const label = `${c.code||''} ${c.name||''}`.trim();
+        this.coverageCategoryQuery = label;
+        this.coverageCatOpen = false;
+        this.coveragePickerOpen = false;
+        this.updateRecentCategories(c.id);
+      },
+      pickCoverageCategory(opt) {
+        if (!opt) return;
+        this.selectedUnmatchedCategory = opt.id;
+        this.coverageCategoryQuery = opt.label;
+        this.coverageCatOpen = false;
+        this.updateRecentCategories(opt.id);
       },
       async recommendForUnmatched(row) {
         if (!row || !row.desc) return;
@@ -335,6 +471,42 @@
           const cands = Array.isArray(row._cands) ? row._cands : [];
           if (!this.createModalCategoryId && cands.length) this.createModalCategoryId = cands[0].categoryId;
         });
+      },
+      openAddRuleModal() {
+        this.createModalRow = null;
+        this.createModalVisible = true;
+        this.createModalFullscreen = false;
+        this.createModalPattern = '';
+        this.createModalPatternType = 'contains';
+        this.createModalPriority = 100;
+        this.createModalTags = '';
+        this.createModalTokens = [];
+        this.createModalCategoryId = this.selectedCategoryId || '';
+        this.modalCategoryQuery = '';
+      },
+      toggleCreateModalFullscreen() {
+        this.createModalFullscreen = !this.createModalFullscreen;
+      },
+      onModalKeydown(e) {
+        if (!this.createModalVisible && !this.confirmVisible) return;
+        if (e.key === 'Escape') {
+          if (this.createModalVisible) this.closeCreateRuleModal();
+          if (this.confirmVisible) this.onConfirmNo();
+        } else if (e.key === 'Enter') {
+          if (e.ctrlKey || e.metaKey) {
+            if (this.createModalVisible) this.confirmCreateRuleNext();
+          } else {
+            if (this.createModalVisible) this.confirmCreateRule();
+          }
+        }
+      },
+      updateRecentCategories(cid) {
+        if (!cid) return;
+        const ids = this.recentCategoryIds.slice();
+        const idx = ids.indexOf(cid);
+        if (idx >= 0) ids.splice(idx, 1);
+        ids.unshift(cid);
+        this.recentCategoryIds = ids.slice(0, 6);
       },
       closeCreateRuleModal() {
         this.createModalVisible = false;
@@ -384,6 +556,7 @@
         const sc = parseInt(c.score || 0, 10);
         const p = Math.min(100, Math.max(60, Math.round(sc / 2)));
         this.createModalPriority = p;
+        this.updateRecentCategories(this.createModalCategoryId);
       },
       toggleKeywordChip(t) {
         const cur = (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean);
@@ -406,6 +579,7 @@
       modalPickCategory(c) {
         if (!c) return;
         this.createModalCategoryId = c.code || c.id;
+        this.updateRecentCategories(this.createModalCategoryId);
       },
       highlightText(text, query) {
         const t = (text || '');
