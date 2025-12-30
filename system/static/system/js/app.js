@@ -177,8 +177,10 @@
           out.push(node);
           const seen = {};
           const children = [].concat(byParent[node.id] || [], byParent[node.code] || []).filter(ch=>{
-            if (seen[ch.id]) return false;
-            seen[ch.id] = true;
+            const k = String(ch.code || ch.id || '');
+            if (!k) return false;
+            if (seen[k]) return false;
+            seen[k] = true;
             return true;
           });
           if (this.expandedIds[node.id]) {
@@ -241,7 +243,14 @@
         const out = [];
         const pushNode = (node) => {
           out.push(node);
-          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []);
+          const seen = {};
+          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []).filter(ch=>{
+            const k = String(ch.code || ch.id || '');
+            if (!k) return false;
+            if (seen[k]) return false;
+            seen[k] = true;
+            return true;
+          });
           if (this.modalExpanded[node.id]) {
             children.forEach(ch => pushNode(ch));
           }
@@ -313,7 +322,14 @@
         const out = [];
         const pushNode = (node) => {
           out.push(node);
-          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []);
+          const seen = {};
+          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []).filter(ch=>{
+            const k = String(ch.code || ch.id || '');
+            if (!k) return false;
+            if (seen[k]) return false;
+            seen[k] = true;
+            return true;
+          });
           if (this.coverageExpanded[node.id]) {
             children.forEach(ch => pushNode(ch));
           }
@@ -514,16 +530,19 @@
       async confirmCreateRule() {
         const cid = this.createModalCategoryId || '';
         if (!cid) { this.showToast('请选择分类', 'error'); return; }
-        const pattern = (this.createModalPattern || '').trim();
-        if (!pattern) { this.showToast('请输入规则Pattern', 'error'); return; }
+        const kwStr = (this.createModalTags || '').trim();
+        if (!kwStr) { this.showToast('请输入关键词（Keywords）', 'error'); return; }
+        const patterns = kwStr.split(',').map(s=>s.trim()).filter(Boolean);
+        const tagStr = (this.createModalPattern || '').trim();
+        const tags = tagStr ? tagStr.split(',').map(s=>s.trim()).filter(Boolean) : [];
         
         const doSave = async () => {
           const payload = {
             categoryId: cid,
-            pattern,
+            patterns,
             patternType: this.createModalPatternType || 'contains',
             priority: parseInt(this.createModalPriority || 80, 10),
-            tags: (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean),
+            tags,
             active: 1
           };
           const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -535,14 +554,33 @@
 
         try {
           const rl = await fetch('/api/rule/list', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ categoryId: cid }) });
-          let exists = false;
+          let exists = [];
           if (rl.ok) {
             const d = await rl.json();
             const rules = Array.isArray(d.rows) ? d.rows : [];
-            exists = rules.some(x => (x.pattern || '') === pattern);
+            const existingSet = new Set(rules.map(x => (x.pattern||'').trim()));
+            exists = patterns.filter(p => existingSet.has((p||'').trim()));
           }
-          if (exists) {
-             this.showConfirm('该分类已存在相同Pattern，仍要保存吗？', doSave, 'Duplicate Pattern');
+          if (exists && exists.length) {
+             const msg = `以下关键词已存在：${exists.join(', ')}\n仍要保存其他新关键词吗？`;
+             this.showConfirm(msg, async () => {
+               // 保存未重复的部分
+               const unique = patterns.filter(p => !exists.includes(p));
+               if (!unique.length) { this.showToast('全部关键词已存在，未保存', 'error'); return; }
+               const payload = {
+                 categoryId: cid,
+                 patterns: unique,
+                 patternType: this.createModalPatternType || 'contains',
+                 priority: parseInt(this.createModalPriority || 80, 10),
+                 tags,
+                 active: 1
+               };
+               const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+               if (r.ok) {
+                 this.closeCreateRuleModal();
+                 this.showToast('Rule created', 'success');
+               }
+             }, 'Duplicate Pattern');
              return;
           }
         } catch(e) {}
@@ -625,12 +663,15 @@
         const rec = row._reco || {};
         const cid = rec.categoryId || this.selectedUnmatchedCategory;
         if (!cid) { this.showToast('请选择分类', 'error'); return; }
+        const pLower = String((rec.pattern || row.desc) || '').trim().toLowerCase();
+        const rawTags = Array.isArray(rec.tags) ? rec.tags : [row.desc];
+        const tags = rawTags.filter(t => String(t || '').trim().toLowerCase() !== pLower);
         const payload = {
           categoryId: cid,
           pattern: rec.pattern || row.desc,
           patternType: rec.patternType || 'contains',
           priority: rec.priority != null ? rec.priority : (this.unmatchedDefaultPriority || 80),
-          tags: Array.isArray(rec.tags) ? rec.tags : [row.desc],
+          tags,
           active: 1
         };
         const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -1243,8 +1284,19 @@
       async deleteRule(r) {
         const target = (r && r.id) ? r : this.ruleForm;
         if (!target || !target.id) return;
-        
-        this.showConfirm('Are you sure you want to delete this rule?', async () => {
+        const pat = String(target.pattern || '').trim();
+        const typ = String(target.patternType || 'contains');
+        const cat = String(target.categoryId || this.selectedCategoryCode || '').trim();
+        const tags = Array.isArray(target.tags) ? target.tags.join(', ') : '';
+        const msg = [
+          '确定要删除以下规则？',
+          '',
+          `Pattern：${pat || '(空)'}`,
+          `Type：${typ}`,
+          `Category：${cat || '(未选择)'}`,
+          tags ? `Tags：${tags}` : ''
+        ].filter(Boolean).join('\n');
+        this.showConfirm(msg, async () => {
           const resp = await fetch('/api/rule/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id:target.id }) });
           if (resp.ok) {
             await this.fetchRules();
@@ -1255,7 +1307,7 @@
           } else {
             this.showToast('Failed to delete rule', 'error');
           }
-        }, 'Delete Rule');
+        }, '删除规则');
       },
       async quickAddRule() {
         if (!this.selectedCategoryId || !this.newRule.pattern) return;

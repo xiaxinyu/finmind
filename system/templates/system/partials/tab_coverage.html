@@ -164,7 +164,7 @@
                                         <option value="">Category...</option>
                                         <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
                                     </select>
-                                    <input v-model="row._reco.pattern" style="flex:1; height:28px; font-size:12px;" placeholder="Pattern">
+                                    <input v-model="row._reco.pattern" style="flex:1; height:28px; font-size:12px;" placeholder="Keywords">
                                     <select v-model="row._reco.patternType" style="width:100px; height:28px; font-size:12px;">
                                         <option value="contains">contains</option>
                                         <option value="equals">equals</option>
