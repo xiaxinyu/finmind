@@ -547,6 +547,9 @@
           };
           const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
           if (r.ok) {
+            if (this.tab === 'rules' && this.selectedCategoryId === cid) {
+              await this.fetchRules();
+            }
             this.closeCreateRuleModal();
             this.showToast('Rule created', 'success');
           }
@@ -577,6 +580,9 @@
                };
                const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
                if (r.ok) {
+                 if (this.tab === 'rules' && this.selectedCategoryId === cid) {
+                   await this.fetchRules();
+                 }
                  this.closeCreateRuleModal();
                  this.showToast('Rule created', 'success');
                }
@@ -676,6 +682,9 @@
         };
         const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         if (resp.ok) {
+          if (this.tab === 'rules' && this.selectedCategoryId === cid) {
+            await this.fetchRules();
+          }
           this.showToast('已保存为规则', 'success');
         }
       },
