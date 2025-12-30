@@ -1,0 +1,35 @@
+{% verbatim %}
+<!-- Toast Notifications -->
+<div class="toast-container">
+    <transition name="toast">
+        <div v-if="toastMessage" class="toast" :class="toastKind">
+            <div class="toast-icon">
+                <span v-if="toastKind==='success'">✓</span>
+                <span v-else-if="toastKind==='error'">✕</span>
+                <span v-else>ℹ</span>
+            </div>
+            <div class="toast-content">{{ toastMessage }}</div>
+            <div class="toast-close" @click="toastMessage=''">×</div>
+        </div>
+    </transition>
+</div>
+
+<!-- Confirm Modal -->
+<transition name="modal">
+    <div v-if="confirmVisible" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>{{ confirmTitle || 'Confirm' }}</h3>
+                <button class="icon-btn" @click="onConfirmNo">×</button>
+            </div>
+            <div class="modal-body">
+                {{ confirmMessage }}
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" @click="onConfirmNo">Cancel</button>
+                <button class="primary" @click="onConfirmYes" ref="confirmYesBtn">Confirm</button>
+            </div>
+        </div>
+    </div>
+</transition>
+{% endverbatim %}

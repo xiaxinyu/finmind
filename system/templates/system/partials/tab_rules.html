@@ -1,0 +1,132 @@
+{% verbatim %}
+<div v-if="tab==='rules'" class="grid-3">
+    <div class="pane">
+        <div class="pane-header">
+            Categories
+            <button class="icon-btn" title="Reload" @click="fetchCategories" :disabled="busyMode==='chat'">↻</button>
+        </div>
+        <div class="toolbar" style="flex-wrap:wrap;">
+            <select v-model="selectedTxnType" @change="changeTxnType(selectedTxnType)" class="full-width">
+                <option value="all">All Types</option>
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+            </select>
+            <div class="dropdown full-width" style="margin-top:8px">
+                <input class="dropdown-input" v-model="categoryQuery" placeholder="Search categories..." @focus="catOpen=true" @keydown="onCategoryQueryKeydown">
+                <div class="dropdown-list" v-if="catOpen">
+                    <div class="dropdown-item" v-for="(opt,idx) in filteredCategoryOptions" :key="opt.id" :class="{active: idx===catHoverIdx}" @mousedown.prevent="pickCategory(opt)">
+                        {{ opt.label }}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="breadcrumb" v-if="categoryBreadcrumb.length">
+            <span v-for="(b,idx) in categoryBreadcrumb" :key="b.id">
+                <span class="crumb" @click="navigateCrumb(b)">{{ b.name || b.code }}</span>
+                <span class="sep" v-if="idx < categoryBreadcrumb.length-1">/</span>
+            </span>
+        </div>
+        <div class="tree">
+            <div class="tree-item"
+                 v-for="c in filteredCategories"
+                 :key="c.id"
+                 :class="{active: selectedCategoryId===c.id}"
+                 :style="{ paddingLeft: ((c.level||0) * 16 + 12) + 'px' }"
+                 @click="onTreeItemClick(c, $event)">
+                <span class="caret" :class="{ hidden: !hasChildren(c) }" @click.stop="toggleExpand(c)">{{ isExpanded(c) ? '▾' : '▸' }}</span>
+                <span class="code">{{ c.code }}</span>
+                <span class="name">{{ c.name }}</span>
+                <span class="badge" v-if="countFor(c)">{{ countFor(c) }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="pane">
+        <div class="pane-header">
+            Rules
+            <span v-if="selectedCategoryName" class="text-muted" style="font-weight:normal; font-size:13px; margin-left:auto;">{{ selectedCategoryName }} ({{ selectedCategoryCode }})</span>
+        </div>
+        <div class="toolbar" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display:flex; gap:8px;">
+                <input v-model="newRule.pattern" placeholder="New pattern..." @keyup.enter="quickAddRule" style="flex:2;">
+                <select v-model="newRule.patternType" style="flex:1;">
+                    <option value="contains">contains</option>
+                    <option value="equals">equals</option>
+                    <option value="startsWith">starts</option>
+                    <option value="endsWith">ends</option>
+                    <option value="regex">regex</option>
+                </select>
+                <input v-model.number="newRule.priority" type="number" placeholder="Pri" style="width:60px;">
+                <button @click="quickAddRule">Add</button>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <input v-model="ruleFilter" placeholder="Filter rules..." style="flex:1;">
+                <button :class="['switch', activeOnly ? 'switch-on' : '']" @click="toggleActiveOnly" style="width:auto;">{{ activeOnly ? 'Active Only' : 'All Rules' }}</button>
+            </div>
+        </div>
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr><th style="width:40px;">#</th><th>Pattern</th><th style="width:80px;">Type</th><th>Tags</th><th style="width:100px;">Weight</th><th style="width:60px;">Active</th><th>Remark</th></tr>
+                </thead>
+                <tbody>
+                    <tr v-if="rulesLoading"><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">Loading...</td></tr>
+                    <tr v-for="(r,idx) in visibleRules" :key="r.id" :class="{'active-row': ruleForm.id === r.id}" @click="editRule(r)" style="cursor:pointer;">
+                        <td class="text-muted">{{ idx+1 }}</td>
+                        <td style="font-weight:500;">{{ r.pattern }}</td>
+                        <td><span style="font-size:11px; padding:2px 6px; background:rgba(255,255,255,0.1); border-radius:4px; color:var(--muted);">{{ r.patternType }}</span></td>
+                        <td><span class="text-muted" style="font-size:12px;">{{ (r.tags||[]).join(', ') }}</span></td>
+                        <td><span class="stars" @click.stop="cycleWeight(r)">{{ starString(r.priority) }}</span></td>
+                        <td><span @click.stop="toggleRuleActive(r)" :class="['dot', r.active ? 'dot-on' : 'dot-off']"></span></td>
+                        <td class="text-muted">{{ r.remark }}</td>
+                    </tr>
+                    <tr v-if="!rulesLoading && !visibleRules.length">
+                        <td colspan="7" class="text-muted" style="text-align:center; padding:40px;">No rules found</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="pane">
+        <div class="pane-header">
+            Edit Rule
+            <button v-if="ruleForm.id" class="icon-btn" title="New" @click="resetRuleForm">+</button>
+        </div>
+        <div style="flex:1; overflow-y:auto; min-height:0;">
+            <div class="form-grid" style="grid-template-columns:100px 1fr;">
+                <div class="label">Category</div><div class="field"><input :value="selectedCategoryCode" disabled class="text-muted"></div>
+                <div class="label">Pattern</div><div class="field"><input v-model="ruleForm.pattern" style="font-weight:600;"></div>
+                <div class="label">Type</div><div class="field">
+                    <select v-model="ruleForm.patternType">
+                        <option value="contains">contains</option>
+                        <option value="equals">equals</option>
+                        <option value="startsWith">startsWith</option>
+                        <option value="endsWith">endsWith</option>
+                        <option value="regex">regex</option>
+                    </select>
+                </div>
+                <div class="label">Weight</div><div class="field"><input v-model.number="ruleForm.priority" type="number"></div>
+                <div class="label">Active</div><div class="field"><div class="tiny-switch" :class="{on: !!ruleForm.active}" @click="toggleFormActive"><span class="knob"></span></div></div>
+                <div class="label">Remark</div><div class="field"><input v-model="ruleForm.remark" placeholder="Optional remark"></div>
+                
+                <div style="grid-column:1/-1; height:1px; background:var(--border); margin:8px 0;"></div>
+                <div style="grid-column:1/-1; color:var(--muted); font-size:12px; font-weight:600; margin-bottom:4px;">Conditions</div>
+
+                <div class="label">Bank</div><div class="field"><input v-model="ruleForm.bankCode" placeholder="Bank name"></div>
+                <div class="label">Card Type</div><div class="field"><input v-model="ruleForm.cardTypeCode" placeholder="Card type"></div>
+                <div class="label">Min Amt</div><div class="field"><input v-model="ruleForm.minAmount" type="number" step="0.01"></div>
+                <div class="label">Max Amt</div><div class="field"><input v-model="ruleForm.maxAmount" type="number" step="0.01"></div>
+                <div class="label">Start Date</div><div class="field"><input v-model="ruleForm.startDate" type="date"></div>
+                <div class="label">End Date</div><div class="field"><input v-model="ruleForm.endDate" type="date"></div>
+                
+                <div style="grid-column:1/-1; height:1px; background:var(--border); margin:8px 0;"></div>
+                <div class="label">Tags</div><div class="field"><input v-model="ruleForm.tags" placeholder="Comma separated tags" @keydown.enter="saveRuleDetail"></div>
+            </div>
+        </div>
+        <div style="padding: 16px; border-top: 1px solid var(--border); display:flex; gap:12px;">
+             <button v-if="ruleForm.id" class="danger" @click="deleteRule">Delete</button>
+             <div style="flex:1"></div>
+             <button @click="saveRuleDetail">Save Rule</button>
+        </div>
+    </div>
+</div>
+{% endverbatim %}

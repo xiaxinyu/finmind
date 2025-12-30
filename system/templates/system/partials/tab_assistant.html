@@ -1,0 +1,35 @@
+{% verbatim %}
+<div v-if="tab==='assistant'" class="grid-2">
+    <div class="card" style="grid-column: span 2; display:flex; flex-direction:column; height: 400px;">
+        <div class="card-title">AI Assistant</div>
+        <div class="chat-box" style="flex:1; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:4px; margin-bottom:10px;">
+            <div v-for="(msg, i) in chatMessages" :key="i" :style="{ textAlign: msg.role==='user'?'right':'left', marginBottom:'8px' }">
+                <span :style="{ background: msg.role==='user'?'var(--primary)':'var(--bg-hover)', color: msg.role==='user'?'white':'var(--text)', padding:'6px 12px', borderRadius:'12px', display:'inline-block', maxWidth:'80%', textAlign:'left' }">
+                    {{ msg.content }}
+                </span>
+                <button v-if="msg.role==='assistant'" class="icon-btn" @click="copyMessage(i)" style="margin-left:6px;">Copy</button>
+            </div>
+            <div v-if="chatLoading" style="color:var(--muted); font-style:italic;">Thinking...</div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <div>
+                <span v-if="chatStatus==='idle'" style="color:var(--muted);">Idle</span>
+                <span v-else-if="chatStatus==='sending'" style="color:#f59e0b;">Sending...</span>
+                <span v-else-if="chatStatus==='received'" style="color:#22c55e;">Received</span>
+                <span v-else-if="chatStatus==='error'" style="color:#ef4444;">Error</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div v-if="chatRespStatus" style="color:var(--muted);">HTTP {{ chatRespStatus }}</div>
+                <div v-if="chatTimestamp" style="color:var(--muted);">Updated {{ chatTimestamp }}</div>
+            </div>
+        </div>
+        <div v-if="chatError" style="color:#ef4444; font-size:12px; margin-bottom:8px;">{{ chatError }}</div>
+        <div style="display:flex; gap:8px;">
+            <input v-model="chatInput" @keyup.enter="sendChatMessage" placeholder="Ask FinMind..." style="flex:1;" :disabled="chatLoading">
+            <button @click="sendChatMessage" :disabled="chatLoading">Send</button>
+            <button @click="retryLastChat" :disabled="chatLoading || chatStatus!=='error'">Retry</button>
+            <button @click="clearChat" :disabled="chatLoading">Clear</button>
+        </div>
+    </div>
+</div>
+{% endverbatim %}

@@ -28,7 +28,12 @@
         unmatchedAbortRequested: false,
         unmatchedBulkProgress: { action: '', done: 0, total: 0 },
         toastMessage: '',
-        toastKind: '',
+        toastKind: '', // 'success', 'error', 'info'
+        toastTimer: null,
+        confirmVisible: false,
+        confirmMessage: '',
+        confirmCallback: null,
+        confirmTitle: 'Confirm',
         unmatchedStartDate: '',
         unmatchedEndDate: '',
         unmatchedBank: '',
@@ -45,6 +50,9 @@
         createModalPatternType: 'contains',
         createModalPriority: 80,
         createModalTags: '',
+        createModalTokens: [],
+        modalExpanded: {},
+        modalCategoryQuery: '',
         categories: [],
         ruleSearch: '',
         selectedCategoryId: '',
@@ -204,6 +212,42 @@
         }
         return chain;
       },
+      modalVisibleCategories() {
+        const all = (this.categories || []).slice();
+        const byParent = {};
+        all.forEach(c => {
+          const pid = c.parentId || '';
+          if (!byParent[pid]) byParent[pid] = [];
+          byParent[pid].push(c);
+        });
+        Object.keys(byParent).forEach(pid => {
+          byParent[pid].sort((a,b) => {
+            if ((a.sortNo||0) !== (b.sortNo||0)) return (a.sortNo||0) - (b.sortNo||0);
+            return (a.code||'').localeCompare(b.code||'');
+          });
+        });
+        const roots = (byParent[''] || all.filter(c => !c.parentId)).sort((a,b)=>{
+          if ((a.sortNo||0) !== (b.sortNo||0)) return (a.sortNo||0) - (b.sortNo||0);
+          return (a.code||'').localeCompare(b.code||'');
+        });
+        const out = [];
+        const pushNode = (node) => {
+          out.push(node);
+          const children = [].concat(byParent[node.id] || [], byParent[node.code] || []);
+          if (this.modalExpanded[node.id]) {
+            children.forEach(ch => pushNode(ch));
+          }
+        };
+        roots.forEach(r => pushNode(r));
+        const q = (this.modalCategoryQuery || '').trim().toLowerCase();
+        if (!q) return out;
+        return out.filter(c => (c.name||'').toLowerCase().includes(q) || (c.code||'').toLowerCase().includes(q));
+      },
+      createModalCategoryName() {
+        if (!this.createModalCategoryId) return '';
+        const c = (this.categories || []).find(x => (x.code || x.id) === this.createModalCategoryId);
+        return c ? `${c.name} (${c.code})` : this.createModalCategoryId;
+      },
       visibleRules() {
         let rows = (this.rules || []).slice();
         const q = (this.ruleFilter || '').trim().toLowerCase();
@@ -284,7 +328,10 @@
           if (rec.pattern) this.createModalPattern = rec.pattern;
           if (rec.patternType) this.createModalPatternType = rec.patternType;
           if (rec.priority != null) this.createModalPriority = rec.priority;
-          if (Array.isArray(rec.tags) && rec.tags.length) this.createModalTags = rec.tags.join(', ');
+          if (Array.isArray(rec.tags) && rec.tags.length) {
+            this.createModalTokens = rec.tags.slice();
+            this.createModalTags = rec.tags.join(', ');
+          }
           const cands = Array.isArray(row._cands) ? row._cands : [];
           if (!this.createModalCategoryId && cands.length) this.createModalCategoryId = cands[0].categoryId;
         });
@@ -295,9 +342,26 @@
       },
       async confirmCreateRule() {
         const cid = this.createModalCategoryId || '';
-        if (!cid) { alert('请选择分类'); return; }
+        if (!cid) { this.showToast('请选择分类', 'error'); return; }
         const pattern = (this.createModalPattern || '').trim();
-        if (!pattern) { alert('请输入规则Pattern'); return; }
+        if (!pattern) { this.showToast('请输入规则Pattern', 'error'); return; }
+        
+        const doSave = async () => {
+          const payload = {
+            categoryId: cid,
+            pattern,
+            patternType: this.createModalPatternType || 'contains',
+            priority: parseInt(this.createModalPriority || 80, 10),
+            tags: (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean),
+            active: 1
+          };
+          const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          if (r.ok) {
+            this.closeCreateRuleModal();
+            this.showToast('Rule created', 'success');
+          }
+        };
+
         try {
           const rl = await fetch('/api/rule/list', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ categoryId: cid }) });
           let exists = false;
@@ -306,21 +370,13 @@
             const rules = Array.isArray(d.rows) ? d.rows : [];
             exists = rules.some(x => (x.pattern || '') === pattern);
           }
-          if (exists && !window.confirm('该分类已存在相同Pattern，仍要保存吗？')) return;
+          if (exists) {
+             this.showConfirm('该分类已存在相同Pattern，仍要保存吗？', doSave, 'Duplicate Pattern');
+             return;
+          }
         } catch(e) {}
-        const payload = {
-          categoryId: cid,
-          pattern,
-          patternType: this.createModalPatternType || 'contains',
-          priority: parseInt(this.createModalPriority || 80, 10),
-          tags: (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean),
-          active: 1
-        };
-        const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        if (r.ok) {
-          this.closeCreateRuleModal();
-          alert('Rule created');
-        }
+        
+        await doSave();
       },
       chooseCandidate(c) {
         if (!c) return;
@@ -328,6 +384,56 @@
         const sc = parseInt(c.score || 0, 10);
         const p = Math.min(100, Math.max(60, Math.round(sc / 2)));
         this.createModalPriority = p;
+      },
+      toggleKeywordChip(t) {
+        const cur = (this.createModalTags || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const has = cur.includes(t);
+        const next = has ? cur.filter(x => x !== t) : cur.concat([t]);
+        this.createModalTags = next.join(', ');
+      },
+      modalHasChildren(c) {
+        if (!c || !c.id) return false;
+        return (this.categories || []).some(x => x.parentId === c.id || x.parentId === c.code);
+      },
+      modalIsExpanded(c) {
+        return !!this.modalExpanded[c.id];
+      },
+      modalToggleExpand(c) {
+        if (!this.modalHasChildren(c)) return;
+        const cur = !!this.modalExpanded[c.id];
+        this.modalExpanded[c.id] = !cur;
+      },
+      modalPickCategory(c) {
+        if (!c) return;
+        this.createModalCategoryId = c.code || c.id;
+      },
+      highlightText(text, query) {
+        const t = (text || '');
+        const q = (query || '').trim();
+        if (!q) return this.escapeHtml(t);
+        const lowerT = t.toLowerCase();
+        const lowerQ = q.toLowerCase();
+        let i = 0;
+        let out = '';
+        while (true) {
+          const idx = lowerT.indexOf(lowerQ, i);
+          if (idx === -1) {
+            out += this.escapeHtml(t.slice(i));
+            break;
+          }
+          out += this.escapeHtml(t.slice(i, idx));
+          out += '<mark>' + this.escapeHtml(t.slice(idx, idx + q.length)) + '</mark>';
+          i = idx + q.length;
+        }
+        return out;
+      },
+      escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       },
       async confirmCreateRuleNext() {
         const cur = this.createModalRow;
@@ -337,11 +443,15 @@
         const next = list[idx+1];
         if (next) this.openCreateRuleModal(next);
       },
+      setPatternFromToken(t) {
+        if (!t) return;
+        this.createModalPattern = t;
+      },
       async applyRecommendation(row) {
         if (!row || !row._reco) return;
         const rec = row._reco || {};
         const cid = rec.categoryId || this.selectedUnmatchedCategory;
-        if (!cid) { alert('请选择分类'); return; }
+        if (!cid) { this.showToast('请选择分类', 'error'); return; }
         const payload = {
           categoryId: cid,
           pattern: rec.pattern || row.desc,
@@ -352,7 +462,7 @@
         };
         const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         if (resp.ok) {
-          alert('已保存为规则');
+          this.showToast('已保存为规则', 'success');
         }
       },
       starString(p) {
@@ -367,11 +477,11 @@
             if (r.ok) {
                 this.coverageResult = await r.json();
             } else {
-                alert('Failed to calculate coverage');
+                this.showToast('Failed to calculate coverage', 'error');
             }
         } catch(e) {
             console.error(e);
-            alert('Error calculating coverage');
+            this.showToast('Error calculating coverage', 'error');
         } finally {
             this.coverageLoading = false;
         }
@@ -905,8 +1015,34 @@
         }
       },
       editRule(r) {
-        const arr = Array.isArray(r.tags) ? r.tags.slice() : [];
-        this.ruleForm = Object.assign({ tagsArr: arr, tagInput:'' }, r);
+        const tagsStr = Array.isArray(r.tags) ? r.tags.join(', ') : '';
+        this.ruleForm = Object.assign({}, r, { tags: tagsStr });
+      },
+      resetRuleForm() {
+        this.ruleForm = { pattern:'', patternType:'contains', priority:100, active:1, remark:'', minAmount:null, maxAmount:null, startDate:null, endDate:null, tags:'', bankCode:'', cardTypeCode:'' };
+      },
+      async saveRuleDetail() {
+        if (!this.selectedCategoryId) { this.showToast('Please select a category first', 'error'); return; }
+        const tags = typeof this.ruleForm.tags === 'string' 
+          ? this.ruleForm.tags.split(',').map(s=>s.trim()).filter(Boolean) 
+          : (Array.isArray(this.ruleForm.tags) ? this.ruleForm.tags : []);
+        
+        const payload = Object.assign({}, this.ruleForm, { 
+          categoryId: this.selectedCategoryId, 
+          tags: tags 
+        });
+        
+        try {
+            const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            if (r.ok) {
+              await this.fetchRules();
+              this.showToast('Rule saved', 'success');
+            } else {
+                this.showToast('Failed to save rule', 'error');
+            }
+        } catch(e) {
+            this.showToast('Error saving rule', 'error');
+        }
       },
       async toggleRuleActive(r) {
         if (!r || !r.id) return;
@@ -930,33 +1066,22 @@
         const v = this.ruleForm.active;
         this.ruleForm.active = v ? 0 : 1;
       },
-      async saveRule() {
-        if (!this.ruleForm) return;
-        const payload = Object.assign({}, this.ruleForm, { categoryId: this.selectedCategoryId, tags: (this.ruleForm.tagsArr||[]) });
-        const r = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        if (r.ok) {
-          await this.fetchRules();
-        }
-      },
-      addTag() {
-        const t = (this.ruleForm.tagInput || '').trim();
-        if (!t) return;
-        this.ruleForm.tagsArr = this.ruleForm.tagsArr || [];
-        if (!this.ruleForm.tagsArr.includes(t)) this.ruleForm.tagsArr.push(t);
-        this.ruleForm.tagInput = '';
-      },
-      removeTag(t) {
-        if (!this.ruleForm || !this.ruleForm.tagsArr) return;
-        this.ruleForm.tagsArr = this.ruleForm.tagsArr.filter(x => x !== t);
-      },
       async deleteRule(r) {
-        if (!r || !r.id) return;
-        const ok = confirm('Delete this rule?');
-        if (!ok) return;
-        const resp = await fetch('/api/rule/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id:r.id }) });
-        if (resp.ok) {
-          await this.fetchRules();
-        }
+        const target = (r && r.id) ? r : this.ruleForm;
+        if (!target || !target.id) return;
+        
+        this.showConfirm('Are you sure you want to delete this rule?', async () => {
+          const resp = await fetch('/api/rule/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id:target.id }) });
+          if (resp.ok) {
+            await this.fetchRules();
+            if (this.ruleForm.id === target.id) {
+              this.resetRuleForm();
+            }
+            this.showToast('Rule deleted', 'success');
+          } else {
+            this.showToast('Failed to delete rule', 'error');
+          }
+        }, 'Delete Rule');
       },
       async quickAddRule() {
         if (!this.selectedCategoryId || !this.newRule.pattern) return;
@@ -1002,7 +1127,30 @@
         if (idx < 0) idx = 0;
         const next = thresholds[idx];
         this.setRuleWeight(r, next);
-      }
+      },
+      showToast(msg, kind='info') {
+        this.toastMessage = msg;
+        this.toastKind = kind;
+        if (this.toastTimer) clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => {
+          this.toastMessage = '';
+        }, 3000);
+      },
+      showConfirm(msg, cb, title='Confirm') {
+        this.confirmMessage = msg;
+        this.confirmCallback = cb;
+        this.confirmTitle = title;
+        this.confirmVisible = true;
+      },
+      onConfirmYes() {
+        if (this.confirmCallback) this.confirmCallback();
+        this.confirmVisible = false;
+        this.confirmCallback = null;
+      },
+      onConfirmNo() {
+        this.confirmVisible = false;
+        this.confirmCallback = null;
+      },
     },
     mounted() {
       this.switchTab(this.tab);

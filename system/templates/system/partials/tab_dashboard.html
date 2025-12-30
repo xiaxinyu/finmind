@@ -1,0 +1,40 @@
+{% verbatim %}
+<div v-if="tab==='dashboard'" class="grid-2">
+    <div class="card">
+        <div class="card-title">2025 Consumption Structure</div>
+        <div class="donut-wrap">
+            <div class="donut" :style="{ background: donutStyle }"></div>
+            <ul class="legend">
+                <li v-for="(row, i) in distribution" :key="row.type">
+                    <span class="swatch" :style="{ background: palette[i % palette.length] }"></span>
+                    <span class="name">{{ row.type }}</span>
+                    <span class="val">{{ (row.ratio*100).toFixed(1) }}%</span>
+                </li>
+            </ul>
+        </div>
+        <div class="summary">
+            <div v-for="row in distribution" :key="row.type" class="summary-row">
+                <div class="summary-name">{{ row.type }}</div>
+                <div class="summary-bar">
+                    <div class="summary-fill" :style="{ width: (row.ratio*100).toFixed(1) + '%'}"></div>
+                </div>
+                <div class="summary-val">{{ (row.ratio*100).toFixed(1) }}%</div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">Financial Health Score</div>
+        <div class="score-badge">Score: {{ health.score }}</div>
+        <div class="score-list">
+            <div class="score-item">
+                <div class="score-name">Spend Control (30%)</div>
+                <div class="score-val">{{ Math.round(health.spendControl) }} / 100</div>
+            </div>
+            <div class="score-item">
+                <div class="score-name">Savings Rate (20%)</div>
+                <div class="score-val">{{ Math.round(health.savingsRate) }} / 100</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endverbatim %}
