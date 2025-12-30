@@ -603,7 +603,14 @@ def dashboard_unmatched_tops(request):
         payload = json.loads(request.body.decode("utf-8")) if request.body else {}
     except Exception:
         payload = {}
-    rules = list(ConsumeRule.objects.filter(active=1).order_by('-priority', 'pattern'))
+    cid = payload.get("categoryId")
+    base_qs = ConsumeRule.objects.filter(active=1)
+    if cid:
+        try:
+            base_qs = base_qs.filter(categoryId=cid)
+        except Exception:
+            pass
+    rules = list(base_qs.order_by('-priority', 'pattern'))
     txns = Transaction.objects.exclude(deleted=1).only('transaction_desc', 'income_money', 'balance_money', 'transaction_date', 'bank_card_name', 'card_type_name')
     sd = payload.get("startDate")
     ed = payload.get("endDate")

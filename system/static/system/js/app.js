@@ -339,10 +339,9 @@
           this.fetchCategories().then(async ()=>{
             await this.fetchCategoryRuleCounts();
             this.coverageCategoryQuery = '';
-            if (!this.selectedUnmatchedCategory) {
-              this.coverageCatOpen = true;
-              this.coverageCatHoverIdx = 0;
-            }
+            this.coverageCatOpen = false;
+            this.coverageCatHoverIdx = 0;
+            this.coveragePickerOpen = false;
           });
           this.unmatchedRows = [];
           this.unmatchedLoading = false;
@@ -746,7 +745,8 @@
             startDate: this.unmatchedStartDate || null,
             endDate: this.unmatchedEndDate || null,
             bank: this.unmatchedBank || null,
-            cardType: this.unmatchedCardType || null
+            cardType: this.unmatchedCardType || null,
+            categoryId: this.selectedUnmatchedCategory || null
           }) });
           if (r.ok) {
             const d = await r.json();

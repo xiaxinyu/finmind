@@ -10,39 +10,39 @@
                     <div class="fill" :style="{ width: (coverageResult ? Math.max(0, Math.min(100, coverageResult.rate||0)) : 0) + '%' }"></div>
                 </div>
             </div>
-            <div class="stats-item">
-                <span class="label">Matches / Total</span>
-                <span class="value">
-                    {{ coverageResult ? coverageResult.covered : '—' }} <small>/ {{ coverageResult ? coverageResult.total : '—' }}</small>
-                </span>
-            </div>
-            <div class="actions">
-            <button class="primary" @click="runFullAnalysis" :disabled="coverageLoading || unmatchedLoading">
-                {{ (coverageLoading || unmatchedLoading) ? 'Analyzing...' : 'Run Analysis' }}
-            </button>
-            </div>
-        </div>
-
-    <div class="pane flex-1" style="flex:1; display:flex; flex-direction:column; min-height:0;">
-        <div class="pane-header">
-            Unmatched Top List
-            <div style="font-weight:normal; font-size:12px; color:var(--muted); margin-left:12px;">
-                <span v-if="unmatchedSummary">Found {{ unmatchedSummary.unmatched }} unmatched items ({{ unmatchedSummary.elapsedMs }}ms)</span>
-            </div>
-        </div>
-
-        <div class="toolbar" style="flex-wrap:nowrap; gap:6px; padding:8px 16px; overflow-x:auto;">
-            
+             <div class="stats-item">
+                 <span class="label">Matches / Total</span>
+                 <span class="value">
+                     {{ coverageResult ? coverageResult.covered : '—' }} <small>/ {{ coverageResult ? coverageResult.total : '—' }}</small>
+                 </span>
+             </div>
+            <div class="actions"><span style="color:var(--muted); font-size:12px;">提示：使用下方绿色按钮运行分析</span></div>
+         </div>
+ 
+     <div class="pane flex-1" style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:visible;">
+         <div class="pane-header" style="gap:12px;">
+             <div style="font-weight:normal; font-size:12px; color:var(--muted);">
+                 <span v-if="unmatchedSummary">找到 {{ unmatchedSummary.unmatched }} 条未匹配</span>
+                 <span v-if="unmatchedSummary" style="margin:0 8px; color:var(--border)">|</span>
+                 <span v-if="unmatchedSummary">用时 {{ unmatchedSummary.elapsedMs }}ms</span>
+             </div>
+         </div>
+ 
+         <div class="toolbar" style="flex-wrap:nowrap; gap:6px; padding:8px 16px; overflow:visible;">
+             
             <div class="toolbar-group">
-                <button class="btn" @click="runFullAnalysis" :disabled="coverageLoading || unmatchedLoading">Run Analysis</button>
+                <button @click="runFullAnalysis" :disabled="coverageLoading || unmatchedLoading">
+                    {{ coverageLoading || unmatchedLoading ? 'Analyzing...' : 'Run Analysis' }}
+                </button>
             </div>
-
-            <div class="toolbar-group" style="margin-left:8px;">
-                <span style="color:var(--muted); font-size:12px; font-weight:600;">Category</span>
-                <div class="dropdown" style="width:280px;">
+ 
+             
+             <div class="toolbar-group" style="margin-left:8px; flex:0 0 360px;">
+                 <span style="color:var(--muted); font-size:12px; font-weight:600;">Category</span>
+                 <div class="dropdown" style="width:280px;">
                     <div style="display:flex; align-items:center; gap:6px;">
                         <div class="chip" @click="coveragePickerOpen = !coveragePickerOpen" :title="selectedUnmatchedCategoryLabel">{{ selectedUnmatchedCategoryLabel }}</div>
-                        <span class="chip" @click="coverageSelectAll()" title="All Categories">All</span>
+                        <span class="chip" v-if="selectedUnmatchedCategory" @click="coverageSelectAll()" title="All Categories">All</span>
                     </div>
                     <div class="dropdown-list" v-if="coveragePickerOpen">
                         <div style="display:flex; align-items:center; gap:8px; padding:8px;">
@@ -114,10 +114,7 @@
             <div style="flex:1"></div>
 
             <div class="toolbar-group" style="border:none;">
-                <button class="icon-btn" title="Export CSV" @click="exportUnmatchedCSV">⇩</button>
-                <button class="toggle" @click="recommendPage" :disabled="unmatchedBulkLoading || !paginatedUnmatchedRows.length" title="Recommend Page">Rec Page</button>
-                <button class="toggle" @click="saveAllRecommendations" :disabled="unmatchedBulkLoading || pendingRecommendationsCount===0" title="Save All Recommendations">Save All</button>
-                <button class="toggle" @click="resetUnmatchedFilters">Reset</button>
+                <button class="toggle" @click="resetUnmatchedFilters">Reset Filters</button>
             </div>
         </div>
 
