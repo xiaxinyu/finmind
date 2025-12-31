@@ -209,6 +209,7 @@
                 <table v-else class="table" style="width: 100%;">
                     <thead>
                         <tr>
+                            <th style="width: 40px; text-align:center;"><input type="checkbox" :checked="isAllUnmatchedSelected" @change="toggleAllUnmatchedDetails"></th>
                             <th>Card Name</th>
                             <th>Posting Date</th>
                             <th>TXN Date</th>
@@ -222,6 +223,7 @@
                     </thead>
                     <tbody>
                         <tr v-for="item in unmatchedDetailRows" :key="item.id">
+                            <td style="text-align:center;"><input type="checkbox" :checked="unmatchedDetailSelection.includes(item.id)" @change="toggleUnmatchedDetailSelection(item.id)"></td>
                             <td>{{ item.cardName || '-' }}</td>
                             <td>{{ formatDate(item.postingDate) }}</td>
                             <td>{{ item.txnDate || '-' }}</td>
@@ -233,13 +235,62 @@
                             <td>{{ item.remarks || '-' }}</td>
                         </tr>
                         <tr v-if="unmatchedDetailRows.length === 0">
-                            <td colspan="9" style="text-align: center; padding: 20px;">No details found.</td>
+                            <td colspan="10" style="text-align: center; padding: 20px;">No details found.</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size: 0.9em; color: var(--muted); margin-right:auto;" v-if="unmatchedDetailSelection.length">
+                    Selected: {{ unmatchedDetailSelection.length }}
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="secondary" @click="closeUnmatchedDetails">Close</button>
+                    <button class="primary" @click="openBatchAssignModal" :disabled="!unmatchedDetailSelection.length">Batch Assign Category</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</transition>
+
+<transition name="modal">
+    <div v-if="batchAssignModalVisible" class="modal-overlay" @keydown="onModalKeydown" tabindex="0">
+        <div class="modal-box" style="width: 500px; max-width: 90%;">
+            <div class="modal-header">
+                <h3>Batch Assign Category</h3>
+                <button class="icon-btn" @click="closeBatchAssignModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Assign {{ unmatchedDetailSelection.length }} transactions to:</label>
+                    <div v-if="batchAssignCategoryId" class="form-group" style="background:var(--bg); padding:8px 10px; border:1px solid var(--accent); border-radius:8px; margin-top:8px;">
+                        <div style="font-size:11px; color:var(--muted)">Selected Category</div>
+                        <div style="font-weight:600; color:var(--accent); font-size:13px; margin-top:2px;">{{ batchAssignCategoryName }}</div>
+                    </div>
+                </div>
+                
+                <div class="form-group" style="height:300px; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:4px; padding:8px;">
+                     <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+                        <input v-model="modalCategoryQuery" placeholder="Search categories..." class="full-width">
+                        <button class="icon-btn" @click="modalCategoryQuery=''" title="Clear">×</button>
+                    </div>
+                    <div class="tree-wrapper" style="flex:1; overflow-y:auto;">
+                        <div class="tree-item"
+                             v-for="c in modalVisibleCategories"
+                             :key="c.id"
+                             :style="{ paddingLeft: ((c.level||0) * 14) + 'px' }"
+                             :class="{ active: batchAssignCategoryId === (c.code||c.id) }"
+                             @click="batchAssignPickCategory(c)">
+                            <span class="caret" :class="{ hidden: !modalHasChildren(c) }" @click.stop="modalToggleExpand(c)">{{ modalIsExpanded(c) ? '▾' : '▸' }}</span>
+                            <span class="code" v-html="highlightText(c.code, modalCategoryQuery)"></span>
+                            <span class="name" v-html="highlightText(c.name, modalCategoryQuery)"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="modal-footer">
-                <button class="secondary" @click="closeUnmatchedDetails">Close</button>
+                <button class="secondary" @click="closeBatchAssignModal">Cancel</button>
+                <button class="primary" @click="submitBatchAssign" :disabled="!batchAssignCategoryId">Confirm Assign</button>
             </div>
         </div>
     </div>
