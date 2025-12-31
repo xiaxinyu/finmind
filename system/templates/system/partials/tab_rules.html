@@ -34,9 +34,9 @@
                  :style="{ paddingLeft: ((c.level||0) * 16 + 12) + 'px' }"
                  @click="onTreeItemClick(c, $event)">
                 <span class="caret" :class="{ hidden: !hasChildren(c) }" @click.stop="toggleExpand(c)">{{ isExpanded(c) ? '▾' : '▸' }}</span>
+                <span class="badge" v-if="countFor(c)">{{ countFor(c) }}</span>
                 <span class="code">{{ c.code }}</span>
                 <span class="name">{{ c.name }}</span>
-                <span class="badge" v-if="countFor(c)">{{ countFor(c) }}</span>
             </div>
         </div>
     </div>

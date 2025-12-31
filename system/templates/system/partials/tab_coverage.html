@@ -1,22 +1,27 @@
 {% verbatim %}
 <div v-if="tab==='coverage'" class="layout-v">
-        <div class="stats-panel">
-            <div class="stats-item">
-                <span class="label">Rule Coverage</span>
-                <span class="value" :style="{color: (coverageResult && coverageResult.rate >= 80) ? 'var(--accent)' : 'var(--text)'}">
-                    {{ coverageResult ? coverageResult.rate : '—' }}<small>%</small>
-                </span>
-                <div class="mini-progress" style="margin-top:6px; width:160px;">
+        <div class="stats-panel" style="height: 54px; padding: 0 16px; gap: 24px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                    <span class="label" style="font-size:11px; line-height:1;">Rule Coverage</span>
+                    <span class="value" :style="{color: (coverageResult && coverageResult.rate >= 80) ? 'var(--accent)' : 'var(--text)', fontSize:'16px', lineHeight:1}">
+                        {{ coverageResult ? coverageResult.rate : '—' }}<small>%</small>
+                    </span>
+                </div>
+                <div class="mini-progress" style="width:100px; height:6px;">
                     <div class="fill" :style="{ width: (coverageResult ? Math.max(0, Math.min(100, coverageResult.rate||0)) : 0) + '%' }"></div>
                 </div>
             </div>
-             <div class="stats-item">
-                 <span class="label">Matches / Total</span>
-                 <span class="value">
-                     {{ coverageResult ? coverageResult.covered : '—' }} <small>/ {{ coverageResult ? coverageResult.total : '—' }}</small>
+            
+            <div style="width:1px; height:24px; background:var(--border);"></div>
+
+             <div style="display:flex; flex-direction:column; gap:2px;">
+                 <span class="label" style="font-size:11px; line-height:1;">Matches / Total</span>
+                 <span class="value" style="font-size:16px; line-height:1;">
+                     {{ coverageResult ? coverageResult.covered : '—' }} <span style="color:var(--muted); font-weight:normal; font-size:13px;">/ {{ coverageResult ? coverageResult.total : '—' }}</span>
                  </span>
              </div>
-            <div class="actions"><span style="color:var(--muted); font-size:12px;">提示：使用下方绿色按钮运行分析</span></div>
+            <div class="actions" style="margin-left:auto;"><span style="color:var(--muted); font-size:12px;">提示：使用下方绿色按钮运行分析</span></div>
          </div>
  
      <div class="pane flex-1" style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:visible;">
@@ -149,29 +154,9 @@
                             <td>
                                 <div class="action-group">
                                     <button class="btn-xs" @click="openCreateRuleModal(row)" title="Create Rule">+ Rule</button>
-                <button class="btn-xs secondary" @click="recommendForUnmatched(row)" :disabled="row._loading">
-                    {{ row._loading ? '...' : 'Auto' }}
-                </button>
-                                </div>
-                            </td>
-                        </tr>
-                        <!-- Inline Recommendation Editor -->
-                        <tr v-if="row._reco" style="background:rgba(255,255,255,0.02);">
-                            <td colspan="3" style="padding:8px 16px;">
-                                <div style="display:flex; gap:8px; align-items:center;">
-                                    <span style="color:var(--accent); font-size:12px; font-weight:600;">RECOMMENDATION</span>
-                                    <select v-model="row._reco.categoryId" style="width:180px; height:28px; font-size:12px;">
-                                        <option value="">Category...</option>
-                                        <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
-                                    </select>
-                                    <input v-model="row._reco.pattern" style="flex:1; height:28px; font-size:12px;" placeholder="Keywords">
-                                    <select v-model="row._reco.patternType" style="width:100px; height:28px; font-size:12px;">
-                                        <option value="contains">contains</option>
-                                        <option value="equals">equals</option>
-                                        <option value="regex">regex</option>
-                                    </select>
-                                    <button class="btn-xs" @click="applyRecommendation(row)">Save</button>
-                                    <button class="btn-xs secondary" @click="clearRecommendation(row)">✕</button>
+                                    <button class="btn-xs secondary" @click="openRecommendation(row)" :disabled="row._loading">
+                                        {{ row._loading ? '...' : 'Auto' }}
+                                    </button>
                                 </div>
                             </td>
                         </tr>

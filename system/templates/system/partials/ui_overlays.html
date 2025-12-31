@@ -20,7 +20,7 @@
                 <h3>{{ confirmTitle || 'Confirm' }}</h3>
                 <button class="icon-btn" @click="onConfirmNo">×</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body auto-height">
                 {{ confirmMessage }}
             </div>
             <div class="modal-footer">
@@ -118,4 +118,63 @@
         </div>
     </div>
 </transition>
+
+<transition name="modal">
+    <div v-if="recommendModalVisible" class="modal-overlay" @keydown="onModalKeydown" tabindex="0">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Recommendation</h3>
+                <button class="icon-btn" @click="closeRecommendationModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-split">
+                    <div class="modal-left">
+                        <div class="form-group">
+                            <label>Category</label>
+                            <select v-model="recommendCategoryId" class="full-width">
+                                <option value="">Category...</option>
+                                <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name || c.code }}</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Keywords</label>
+                            <input v-model="recommendKeywords" placeholder="comma separated" class="full-width">
+                        </div>
+                        <div class="form-group">
+                            <label>Tags</label>
+                            <input v-model="recommendTags" placeholder="comma separated" class="full-width">
+                        </div>
+                        <div class="row" style="gap:12px;">
+                            <div class="form-group" style="flex:1">
+                                <label>Type</label>
+                                <select v-model="recommendPatternType" class="full-width">
+                                    <option value="contains">contains</option>
+                                    <option value="equals">equals</option>
+                                    <option value="startsWith">startsWith</option>
+                                    <option value="endsWith">endsWith</option>
+                                    <option value="regex">regex</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex:1">
+                                <label>Priority</label>
+                                <input v-model.number="recommendPriority" type="number" class="full-width">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-right">
+                        <div class="form-group">
+                            <label>Source</label>
+                            <input :value="(recommendRow && recommendRow.desc) || ''" disabled class="full-width">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" @click="closeRecommendationModal">Cancel</button>
+                <button class="primary" @click="confirmRecommendationSave">Save</button>
+            </div>
+        </div>
+    </div>
+ </transition>
+
 {% endverbatim %}

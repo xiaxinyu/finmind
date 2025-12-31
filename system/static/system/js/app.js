@@ -34,6 +34,13 @@
         confirmMessage: '',
         confirmCallback: null,
         confirmTitle: 'Confirm',
+        recommendModalVisible: false,
+        recommendRow: null,
+        recommendCategoryId: '',
+        recommendKeywords: '',
+        recommendTags: '',
+        recommendPatternType: 'contains',
+        recommendPriority: 80,
         unmatchedStartDate: '',
         unmatchedEndDate: '',
         unmatchedBank: '',
@@ -462,6 +469,50 @@
           }
         } catch(e) {} finally {
           row._loading = false;
+        }
+      },
+      async openRecommendation(row) {
+        if (!row || !row.desc) return;
+        await this.recommendForUnmatched(row);
+        const rec = row._reco || {};
+        this.recommendModalVisible = true;
+        this.recommendRow = row;
+        this.recommendCategoryId = rec.categoryId || this.selectedUnmatchedCategory || '';
+        const kw = rec.pattern ? [rec.pattern] : [];
+        const toks = Array.isArray(rec.tags) ? rec.tags : [];
+        const allKw = Array.from(new Set([].concat(kw, toks))).filter(Boolean);
+        this.recommendKeywords = allKw.join(', ');
+        this.recommendTags = Array.isArray(rec.tags) ? rec.tags.join(', ') : row.desc || '';
+        this.recommendPatternType = (rec.patternType || 'contains');
+        this.recommendPriority = rec.priority != null ? rec.priority : (this.unmatchedDefaultPriority || 80);
+      },
+      closeRecommendationModal() {
+        this.recommendModalVisible = false;
+        this.recommendRow = null;
+      },
+      async confirmRecommendationSave() {
+        const cid = this.recommendCategoryId || '';
+        if (!cid) { this.showToast('请选择分类', 'error'); return; }
+        const patterns = String(this.recommendKeywords || '').split(',').map(s=>s.trim()).filter(Boolean);
+        if (!patterns.length) { this.showToast('请输入关键词', 'error'); return; }
+        const tags = String(this.recommendTags || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const payload = {
+          categoryId: cid,
+          patterns,
+          patternType: this.recommendPatternType || 'contains',
+          priority: parseInt(this.recommendPriority || 80, 10),
+          tags,
+          active: 1
+        };
+        const resp = await fetch('/api/rule/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if (resp.ok) {
+          this.showToast('已保存为规则', 'success');
+          this.closeRecommendationModal();
+          if (this.tab === 'rules' && this.selectedCategoryId === cid) {
+            await this.fetchRules();
+          }
+        } else {
+          this.showToast('保存失败', 'error');
         }
       },
       openCreateRuleModal(row) {
