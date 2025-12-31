@@ -157,6 +157,7 @@
                                     <button class="btn-xs secondary" @click="openRecommendation(row)" :disabled="row._loading">
                                         {{ row._loading ? '...' : 'Auto' }}
                                     </button>
+                                    <button class="btn-xs" @click="fetchUnmatchedDetails(row)" title="View Details">Details</button>
                                 </div>
                             </td>
                         </tr>

@@ -672,3 +672,167 @@ def dashboard_unmatched_dimensions(request):
     except Exception:
         pass
     return JsonResponse({"banks": banks, "cardTypes": cards, "dateMin": date_min, "dateMax": date_max})
+
+@csrf_exempt
+def rule_unmatched_details(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        payload = {}
+        
+    target_desc = payload.get("description")
+    if not target_desc:
+        return JsonResponse({"rows": []})
+    target_key = _norm(target_desc)
+    
+    # Common filtering logic
+    cid = payload.get("categoryId")
+    base_qs = ConsumeRule.objects.filter(active=1)
+    if cid:
+        try:
+            base_qs = base_qs.filter(categoryId=cid)
+        except Exception:
+            pass
+    rules = list(base_qs.order_by('-priority', 'pattern'))
+    
+    # Need more fields for details
+    txns = Transaction.objects.exclude(deleted=1)
+    
+    sd = payload.get("startDate")
+    ed = payload.get("endDate")
+    bank = payload.get("bank")
+    card = payload.get("cardType")
+    
+    if sd:
+        try:
+            from datetime import datetime
+            sdt = datetime.fromisoformat(sd)
+            txns = txns.filter(transaction_date__gte=sdt)
+        except Exception:
+            pass
+    if ed:
+        try:
+            from datetime import datetime, timedelta
+            edt = datetime.fromisoformat(ed) + timedelta(days=1)
+            txns = txns.filter(transaction_date__lt=edt)
+        except Exception:
+            pass
+    if bank:
+        txns = txns.filter(bank_card_name__icontains=bank)
+    if card:
+        txns = txns.filter(card_type_name__icontains=card)
+        
+    ids = [x.id for x in rules]
+    tags_map = {}
+    if ids:
+        for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
+            tags_map.setdefault(t["rule_id"], []).append(t["tag"])
+            
+    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
+    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
+    other_codes = set(list(others) + list(others_en))
+    
+    rows = []
+    # We iterate over the queryset directly to avoid loading all fields into memory if possible, 
+    # but we need model instances for _matches.
+    # To optimize, we first filter by description in memory (since _norm is not db-level)
+    # Ideally we would do a db-level contains query first, but _norm removes spaces etc.
+    # Let's stick to list(txns) as in previous method for consistency.
+    txn_list = list(txns)
+    
+    for t in txn_list:
+        # 1. Description check
+        if _norm(t.transaction_desc or "") != target_key:
+            continue
+            
+        # 2. Rule check (verify it is unmatched)
+        matched_cat = None
+        for r in rules:
+            if _matches(r, t, tags_map.get(r.id, [])):
+                matched_cat = r.categoryId
+                break
+                
+        if (not matched_cat) or (matched_cat in other_codes):
+            rows.append({
+                "id": t.id,
+                "cardName": t.bank_card_name,
+                "postingDate": t.transaction_date,
+                "txnDate": t.transaction_time, 
+                "desc": t.transaction_desc,
+                "currency": t.balance_currency,
+                "amount": t.income_money, # We pass raw amount, frontend handles display
+                "balance": t.account_balance,
+                "category": t.consume_name,
+                "remarks": t.demoarea
+            })
+            
+    # Sort by date desc
+    rows.sort(key=lambda x: x["postingDate"] if x["postingDate"] else "", reverse=True)
+    
+    return JsonResponse({"rows": rows})
+
+@csrf_exempt
+def rule_batch_assign(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
+    
+    cat_id = payload.get("categoryId")
+    if not cat_id:
+        return HttpResponseBadRequest("missing categoryId")
+    
+    # Verify category
+    cat = ConsumeCategory.objects.filter(id=cat_id).first()
+    if not cat:
+        cat = ConsumeCategory.objects.filter(code=cat_id).first()
+    if not cat:
+        return HttpResponseBadRequest("invalid category")
+        
+    target_code = cat.code if cat.code else cat.id
+    target_name = cat.name
+    
+    txn_ids = payload.get("transactionIds")
+    desc_str = payload.get("description")
+    
+    # 1. Update Transactions
+    updated_count = 0
+    if txn_ids and isinstance(txn_ids, list) and len(txn_ids) > 0:
+        qs = Transaction.objects.filter(id__in=txn_ids)
+        # Update db fields
+        updated_count = qs.update(
+            consume_id=target_code,
+            consume_code=target_code,
+            consume_name=target_name
+        )
+    
+    # 2. Create/Update Rule (to ensure persistence)
+    rule_created = False
+    if desc_str:
+        norm_desc = (desc_str or "").strip()
+        if norm_desc:
+            # Check if exact rule exists
+            exist = ConsumeRule.objects.filter(pattern=norm_desc, patternType="equals").first()
+            if exist:
+                if exist.categoryId != target_code:
+                    exist.categoryId = target_code
+                    exist.active = 1
+                    exist.save()
+                    rule_created = True
+            else:
+                import uuid
+                ConsumeRule.objects.create(
+                    id=str(uuid.uuid4()),
+                    categoryId=target_code,
+                    pattern=norm_desc,
+                    patternType="equals",
+                    priority=100,
+                    active=1
+                )
+                rule_created = True
+                
+    return JsonResponse({"updated": updated_count, "ruleCreated": rule_created})

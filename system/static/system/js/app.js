@@ -96,7 +96,14 @@
         chatRespStatus: null,
         chatError: '',
         busyMode: '',
-        chatTimestamp: ''
+        chatTimestamp: '',
+        unmatchedDetailVisible: false,
+        unmatchedDetailRows: [],
+        unmatchedDetailLoading: false,
+        unmatchedDetailDesc: '',
+        unmatchedDetailSelection: [],
+        batchAssignModalVisible: false,
+        batchAssignCategoryId: ''
       };
     },
     created() {
@@ -345,9 +352,75 @@
         const q = (this.coverageCategoryQuery || '').trim().toLowerCase();
         if (!q) return out;
         return out.filter(c => (c.name||'').toLowerCase().includes(q) || (c.code||'').toLowerCase().includes(q));
+      },
+      isAllUnmatchedSelected() {
+        const rows = this.unmatchedDetailRows || [];
+        if (!rows.length) return false;
+        return rows.every(r => this.unmatchedDetailSelection.includes(r.id));
+      },
+      batchAssignCategoryName() {
+        if (!this.batchAssignCategoryId) return '';
+        const c = (this.categories || []).find(x => (x.code || x.id) === this.batchAssignCategoryId);
+        return c ? `${c.name} (${c.code})` : this.batchAssignCategoryId;
       }
     },
     methods: {
+      toggleUnmatchedDetailSelection(id) {
+        const idx = this.unmatchedDetailSelection.indexOf(id);
+        if (idx >= 0) this.unmatchedDetailSelection.splice(idx, 1);
+        else this.unmatchedDetailSelection.push(id);
+      },
+      toggleAllUnmatchedDetails() {
+        if (this.isAllUnmatchedSelected) {
+          this.unmatchedDetailSelection = [];
+        } else {
+          this.unmatchedDetailSelection = (this.unmatchedDetailRows||[]).map(x=>x.id);
+        }
+      },
+      openBatchAssignModal() {
+        if (!this.unmatchedDetailSelection.length) return;
+        this.batchAssignCategoryId = '';
+        this.batchAssignModalVisible = true;
+      },
+      closeBatchAssignModal() {
+        this.batchAssignModalVisible = false;
+        this.batchAssignCategoryId = '';
+      },
+      batchAssignPickCategory(c) {
+        if (!c) return;
+        this.batchAssignCategoryId = c.id;
+        this.updateRecentCategories(c.id);
+      },
+      async submitBatchAssign() {
+        if (!this.batchAssignCategoryId) {
+          this.showToast('Please select a category', 'error');
+          return;
+        }
+        const payload = {
+          categoryId: this.batchAssignCategoryId,
+          transactionIds: this.unmatchedDetailSelection,
+          description: this.unmatchedDetailDesc
+        };
+        try {
+          const r = await fetch('/api/rule/batch-assign', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+          });
+          if (r.ok) {
+            const d = await r.json();
+            this.showToast(`Updated ${d.updated} transactions. Rule ${d.ruleCreated?'created':'updated'}.`, 'success');
+            this.closeBatchAssignModal();
+            this.unmatchedDetailSelection = [];
+            // Refresh list
+            this.fetchUnmatchedDetails(this.unmatchedDetailDesc, true); 
+          } else {
+            this.showToast('Batch assign failed', 'error');
+          }
+        } catch(e) {
+          this.showToast('Error: '+e.message, 'error');
+        }
+      },
       async runFullAnalysis() {
         await this.calculateCoverage();
         await this.fetchUnmatchedTops();
@@ -478,6 +551,7 @@
         this.recommendModalVisible = true;
         this.recommendRow = row;
         this.recommendCategoryId = rec.categoryId || this.selectedUnmatchedCategory || '';
+        this.modalCategoryQuery = ''; // Reset tree search
         const kw = rec.pattern ? [rec.pattern] : [];
         const toks = Array.isArray(rec.tags) ? rec.tags : [];
         const allKw = Array.from(new Set([].concat(kw, toks))).filter(Boolean);
@@ -514,6 +588,53 @@
         } else {
           this.showToast('保存失败', 'error');
         }
+      },
+      async fetchUnmatchedDetails(row) {
+        if (!row || !row.desc) return;
+        this.unmatchedDetailVisible = true;
+        this.unmatchedDetailLoading = true;
+        this.unmatchedDetailDesc = row.desc;
+        this.unmatchedDetailRows = [];
+        try {
+          const payload = {
+            description: row.desc,
+            startDate: this.unmatchedStartDate || null,
+            endDate: this.unmatchedEndDate || null,
+            bank: this.unmatchedBank || null,
+            cardType: this.unmatchedCardType || null,
+            categoryId: this.selectedUnmatchedCategory || null
+          };
+          const r = await fetch('/api/rule/unmatched-details', { 
+            method:'POST', 
+            headers:{'Content-Type':'application/json'}, 
+            body: JSON.stringify(payload) 
+          });
+          if (r.ok) {
+            const d = await r.json();
+            this.unmatchedDetailRows = Array.isArray(d.rows) ? d.rows : [];
+          }
+        } catch(e) {
+          this.showToast('Failed to load details', 'error');
+        } finally {
+          this.unmatchedDetailLoading = false;
+        }
+      },
+      closeUnmatchedDetails() {
+        this.unmatchedDetailVisible = false;
+        this.unmatchedDetailRows = [];
+        this.unmatchedDetailDesc = '';
+      },
+      formatDate(ts) {
+        if (!ts) return '-';
+        try {
+          const d = new Date(ts);
+          if (isNaN(d.getTime())) return ts;
+          return d.toISOString().slice(0, 10);
+        } catch(e) { return ts; }
+      },
+      formatMoney(val) {
+        if (val == null) return '-';
+        return Number(val).toFixed(2);
       },
       openCreateRuleModal(row) {
         if (!row || !row.desc) return;
@@ -1437,6 +1558,54 @@
         this.confirmVisible = false;
         this.confirmCallback = null;
       },
+      async fetchUnmatchedDetails(row) {
+        if (!row || !row.desc) return;
+        this.unmatchedDetailVisible = true;
+        this.unmatchedDetailLoading = true;
+        this.unmatchedDetailDesc = row.desc;
+        this.unmatchedDetailRows = [];
+        try {
+          const payload = {
+             description: row.desc,
+             startDate: this.unmatchedStartDate || null,
+             endDate: this.unmatchedEndDate || null,
+             bank: this.unmatchedBank || null,
+             cardType: this.unmatchedCardType || null,
+             categoryId: this.selectedUnmatchedCategory || null
+          };
+          const r = await fetch('/api/rule/unmatched-details', { 
+            method:'POST', 
+            headers:{'Content-Type':'application/json'}, 
+            body: JSON.stringify(payload) 
+          });
+          if (r.ok) {
+             const d = await r.json();
+             this.unmatchedDetailRows = Array.isArray(d.rows) ? d.rows : [];
+          }
+        } catch(e) {
+          this.showToast('Failed to load details', 'error');
+        } finally {
+          this.unmatchedDetailLoading = false;
+        }
+      },
+      closeUnmatchedDetails() {
+        this.unmatchedDetailVisible = false;
+        this.unmatchedDetailRows = [];
+        this.unmatchedDetailDesc = '';
+      },
+      formatDate(ts) {
+        if (!ts) return '-';
+        try {
+          // Handle ISO string or timestamp
+          const d = new Date(ts);
+          if (isNaN(d.getTime())) return ts;
+          return d.toISOString().slice(0, 10);
+        } catch(e) { return ts; }
+      },
+      formatMoney(val) {
+        if (val == null) return '-';
+        return Number(val).toFixed(2);
+      }
     },
     mounted() {
       this.switchTab(this.tab);
