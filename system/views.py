@@ -1,19 +1,30 @@
-from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
-from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag, Transaction
-from django.db import models
-from django.conf import settings
 import unicodedata
 import re
 import logging
 import json
+import uuid
+from account.analyzer.BusinessAnalyzer import BusinessAnalyzer
+from persist.models import Credit, AppUser, ConsumeCategory, ConsumeRule, ConsumeRuleTag, Transaction
+from django.db import models
+from django.conf import settings
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 from django.shortcuts import render, redirect
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password
 from account.analyzer.ConsumptionAnalyzer import ConsumptionAnalyzer
 
 logger = logging.getLogger("finmind.auth")
+
+
+def _parse_json(request, allow_empty=False):
+    if not request.body:
+        return {} if allow_empty else None
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return None
 
 def hello(request):
     return HttpResponse("Hello, World!")
@@ -22,9 +33,8 @@ def login_page(request):
     return render(request, "system/login.html")
 
 @csrf_exempt
+@require_POST
 def authentication_form(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
     username = request.POST.get("username")
     password = request.POST.get("password")
     u = AppUser.objects.filter(username=username, enabled=1).first()
@@ -81,12 +91,10 @@ def favicon_ico(request):
     return redirect(f"{settings.STATIC_URL}system/favicon.svg")
 
 @csrf_exempt
+@require_POST
 def classify_transaction(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
+    payload = _parse_json(request)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     description = payload.get("description")
     money = payload.get("money")
@@ -97,12 +105,10 @@ def classify_transaction(request):
     return JsonResponse({"consumption": ct})
 
 @csrf_exempt
+@require_POST
 def insights(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
+    payload = _parse_json(request)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     lines = payload.get("lines")
     if not lines or not isinstance(lines, list):
@@ -135,12 +141,10 @@ def insights(request):
     return JsonResponse({"distribution": out})
 
 @csrf_exempt
+@require_POST
 def rule_categories(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     
     txn_types = payload.get("txn_types") # 'all', 'expense', 'income'
@@ -184,12 +188,10 @@ def _rule_row(obj):
     }
 
 @csrf_exempt
+@require_POST
 def rule_list(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     cid = payload.get("categoryId")
     if not cid:
@@ -212,7 +214,6 @@ def rule_list(request):
     try:
         sql = str(qs.query)
         logger.info("sql_rule_list keys=%s sql=%s", ",".join(keys), sql)
-        print(f"sql_rule_list keys={','.join(keys)} sql={sql}")
     except Exception:
         pass
     rows = list(qs)
@@ -229,12 +230,10 @@ def rule_list(request):
     return JsonResponse({"rows": data})
 
 @csrf_exempt
+@require_POST
 def rule_counts(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     codes = payload.get("codes") or []
     if not isinstance(codes, list):
@@ -246,7 +245,6 @@ def rule_counts(request):
         try:
             sql = str(agg.query)
             logger.info("sql_rule_counts codes=%s sql=%s", ",".join(codes[:10]), sql)
-            print(f"sql_rule_counts codes={','.join(codes[:10])} sql={sql}")
         except Exception:
             pass
         for c in agg:
@@ -254,12 +252,10 @@ def rule_counts(request):
     return JsonResponse({"counts": counts})
 
 @csrf_exempt
+@require_POST
 def rule_save(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
+    payload = _parse_json(request)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     rid = payload.get("id")
     fields = ["categoryId","pattern","patternType","priority","active","bankCode","cardTypeCode","remark","minAmount","maxAmount","startDate","endDate"]
@@ -284,7 +280,6 @@ def rule_save(request):
                 row["patternType"] = "contains"
             if row.get("priority") is None:
                 row["priority"] = 100
-            import uuid
             obj = ConsumeRule.objects.create(id=str(uuid.uuid4()), **row)
             created_ids.append(obj.id)
             if tags_payload is not None:
@@ -311,22 +306,19 @@ def rule_save(request):
     else:
         if not data.get("pattern"):
             return HttpResponseBadRequest("missing pattern")
-        import uuid
         obj = ConsumeRule.objects.create(id=str(uuid.uuid4()), **data)
         if tags_payload is not None:
             tags = tags_payload if isinstance(tags_payload, list) else str(tags_payload or "").split(",")
             tags = [t.strip() for t in tags if t and t.strip()]
             for t in tags:
                 ConsumeRuleTag.objects.create(rule_id=obj.id, tag=t)
-        return JsonResponse({"id": obj.id, "created": True})
+    return JsonResponse({"id": obj.id, "created": True})
 
 @csrf_exempt
+@require_POST
 def rule_delete(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
+    payload = _parse_json(request)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     rid = payload.get("id")
     if not rid:
@@ -339,12 +331,10 @@ def rule_delete(request):
     return JsonResponse({"ok": True})
 
 @csrf_exempt
+@require_POST
 def rule_recommend(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
+    payload = _parse_json(request)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     desc = (payload.get("desc") or payload.get("description") or "").strip()
     if not desc:
@@ -486,6 +476,12 @@ def _amount_of(txn):
     except Exception:
         return None
 
+
+def _other_category_codes():
+    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list("code", flat=True)
+    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list("code", flat=True)
+    return set(list(others) + list(others_en))
+
 def _matches(rule, txn, tags=None):
     desc = _norm(txn.transaction_desc or "")
     opp = _norm(getattr(txn, "opponent_name", "") or "") + " " + _norm(getattr(txn, "opponent_account", "") or "")
@@ -553,9 +549,7 @@ def dashboard_coverage(request):
         for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
             tags_map.setdefault(t["rule_id"], []).append(t["tag"])
     
-    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
-    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
-    other_codes = set(list(others) + list(others_en))
+    other_codes = _other_category_codes()
     
     txn_list = list(txns)
     total = len(txn_list)
@@ -579,15 +573,13 @@ def dashboard_coverage(request):
     return JsonResponse({"rate": round(rate, 1), "total": total, "covered": covered})
 
 @csrf_exempt
+@require_POST
 def dashboard_unmatched_tops(request):
     import time
     t0 = time.time()
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
-        payload = {}
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
+        return HttpResponseBadRequest("invalid json")
     cid = payload.get("categoryId")
     base_qs = ConsumeRule.objects.filter(active=1)
     if cid:
@@ -624,9 +616,7 @@ def dashboard_unmatched_tops(request):
     if ids:
         for t in ConsumeRuleTag.objects.filter(rule_id__in=ids).values("rule_id", "tag"):
             tags_map.setdefault(t["rule_id"], []).append(t["tag"])
-    others = ConsumeCategory.objects.filter(name__icontains="其他").values_list('code', flat=True)
-    others_en = ConsumeCategory.objects.filter(name__icontains="Other").values_list('code', flat=True)
-    other_codes = set(list(others) + list(others_en))
+    other_codes = _other_category_codes()
     txn_list = list(txns)
     freq = {}
     samples = {}
@@ -652,6 +642,7 @@ def dashboard_unmatched_tops(request):
     return JsonResponse({"rows": rows, "total": total, "unmatched": unmatched, "elapsedMs": elapsed_ms})
 
 @csrf_exempt
+@require_POST
 def dashboard_unmatched_dimensions(request):
     qs = Transaction.objects.exclude(deleted=1).only('bank_card_name', 'card_type_name', 'transaction_date')
     try:
@@ -674,13 +665,11 @@ def dashboard_unmatched_dimensions(request):
     return JsonResponse({"banks": banks, "cardTypes": cards, "dateMin": date_min, "dateMax": date_max})
 
 @csrf_exempt
+@require_POST
 def rule_unmatched_details(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
-        payload = {}
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
+        return HttpResponseBadRequest("invalid json")
         
     target_desc = payload.get("description")
     if not target_desc:
@@ -774,12 +763,10 @@ def rule_unmatched_details(request):
     return JsonResponse({"rows": rows})
 
 @csrf_exempt
+@require_POST
 def rule_batch_assign(request):
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    try:
-        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except Exception:
+    payload = _parse_json(request, allow_empty=True)
+    if payload is None:
         return HttpResponseBadRequest("invalid json")
     
     cat_id = payload.get("categoryId")

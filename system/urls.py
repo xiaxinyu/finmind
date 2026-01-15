@@ -6,6 +6,8 @@ from .views import (
     rule_batch_assign
 )
 
+app_name = "system"
+
 urlpatterns = [
     path("classify", classify_transaction),
     path("insights", insights),
