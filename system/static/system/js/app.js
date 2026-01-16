@@ -15,6 +15,9 @@
         health: { score: 0, spendControl: 0, savingsRate: 0 },
         coverageResult: null,
         coverageLoading: false,
+        modelMetrics: null,
+        modelMetricsLoading: false,
+        modelMetricsLastUpdated: '',
         unmatchedRows: [],
         unmatchedLoading: false,
         unmatchedSummary: null,
@@ -445,6 +448,8 @@
           this.loadUnmatchedSettings();
         } else if (t === 'assistant') {
           // nothing extra
+        } else if (t === 'model') {
+          this.fetchModelMetrics();
         }
       },
       async fetchUnmatchedDimensions() {
@@ -880,6 +885,33 @@
         } finally {
             this.coverageLoading = false;
         }
+      },
+      async fetchModelMetrics() {
+        this.modelMetricsLoading = true;
+        try {
+          const r = await fetch('/api/dashboard/model-metrics', { method: 'POST' });
+          if (r.ok) {
+            this.modelMetrics = await r.json();
+            try { this.modelMetricsLastUpdated = new Date().toLocaleString(); } catch(e) {}
+          } else {
+            this.showToast('Failed to load model metrics', 'error');
+          }
+        } catch(e) {
+          this.showToast('Error loading model metrics', 'error');
+        } finally {
+          this.modelMetricsLoading = false;
+        }
+      },
+      exportModelMetrics() {
+        if (!this.modelMetrics) return;
+        const data = JSON.stringify(this.modelMetrics, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'model_metrics.json';
+        a.click();
+        URL.revokeObjectURL(url);
       },
       retryLastChat() {
         if (this.chatLoading) return;

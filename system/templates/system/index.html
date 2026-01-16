@@ -24,6 +24,7 @@
                 <div class="menu-item" :class="{active: tab==='rules'}" @click="switchTab('rules')">Rules</div>
                 <div class="menu-item" :class="{active: tab==='coverage'}" @click="switchTab('coverage')">Coverage</div>
                 <div class="menu-item" :class="{active: tab==='assistant'}" @click="switchTab('assistant')">Assistant</div>
+                <div class="menu-item" :class="{active: tab==='model'}" @click="switchTab('model')">Model</div>
             </aside>
             {% endverbatim %}
             <div class="content">
@@ -31,6 +32,47 @@
                 {% include "system/partials/tab_rules.html" %}
                 {% include "system/partials/tab_coverage.html" %}
                 {% include "system/partials/tab_assistant.html" %}
+                {% verbatim %}
+                <div v-if="tab==='model'" class="grid-1">
+                    <div class="card">
+                        <div class="card-title">模型表现 / Model Performance</div>
+                        <div style="display:flex; gap:8px; margin-bottom:10px;">
+                            <button class="primary" @click="fetchModelMetrics">刷新指标</button>
+                            <button class="secondary" @click="exportModelMetrics" :disabled="!modelMetrics">导出 JSON</button>
+                            <span v-if="modelMetricsLastUpdated" style="color:var(--muted);">最近更新：{{ modelMetricsLastUpdated }}</span>
+                        </div>
+                        <div v-if="modelMetricsLoading" style="padding: 12px;">Loading model metrics...</div>
+                        <div v-else>
+                            <pre style="white-space:pre-wrap; line-height:1.6;">
+规则覆盖率
+{{ ((modelMetrics && modelMetrics.coverageRate) || 0).toFixed(1) }}%
+覆盖 {{ (modelMetrics && modelMetrics.coveredTxns) || 0 }} / {{ (modelMetrics && modelMetrics.totalTxns) || 0 }} 笔交易
+未匹配占比
+{{ ((modelMetrics && modelMetrics.unmatchedRate) || 0).toFixed(1) }}%
+未匹配 {{ (modelMetrics && modelMetrics.unmatchedTxns) || 0 }} 笔
+模型 Top-1 准确率
+{{ (modelMetrics && modelMetrics.modelTopK && modelMetrics.modelTopK.top1 != null) ? (modelMetrics.modelTopK.top1*100).toFixed(1)+'%' : '未配置' }}
+可在接入训练模型后填充
+模型 Top-3 准确率
+{{ (modelMetrics && modelMetrics.modelTopK && modelMetrics.modelTopK.top3 != null) ? (modelMetrics.modelTopK.top3*100).toFixed(1)+'%' : '未配置' }}
+预留指标，后续可从离线评估导入
+
+你可以在这里做什么：
+- 接入训练好的分类模型，填充 Top-K 指标
+- 查看覆盖率/未匹配占比，识别规则薄弱环节
+- 导出当前指标（JSON），用于报表或对比
+- 在“未匹配详情”中结合模型推荐，提升自动化分类
+                            </pre>
+                            <div v-if="modelLogs && modelLogs.length" style="margin-top:8px;">
+                                <div style="font-weight:600; margin-bottom:6px;">系统建议：</div>
+                                <ul>
+                                    <li v-for="(line, i) in modelLogs" :key="i">{{ line }}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endverbatim %}
             </div>
             {% include "system/partials/ui_overlays.html" %}
         </div>

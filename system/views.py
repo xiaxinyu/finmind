@@ -572,6 +572,142 @@ def dashboard_coverage(request):
     rate = (covered / total) * 100 if total > 0 else 0
     return JsonResponse({"rate": round(rate, 1), "total": total, "covered": covered})
 
+
+@csrf_exempt
+@require_POST
+def dashboard_model_metrics(request):
+    try:
+        logger.info("dashboard_model_metrics_start")
+    except Exception:
+        pass
+    cov = {}
+    try:
+        cov_resp = dashboard_coverage(request)
+        if isinstance(cov_resp, JsonResponse):
+            cov = json.loads(cov_resp.content.decode("utf-8"))
+    except Exception:
+        cov = {}
+    try:
+        txns_qs = Transaction.objects.exclude(deleted=1)
+        total_txn = txns_qs.count()
+        unmatched_qs = txns_qs.filter(models.Q(consume_code__isnull=True) | models.Q(consume_code=""))
+        unmatched_txn = unmatched_qs.count()
+    except Exception:
+        total_txn = 0
+        unmatched_txn = 0
+    unmatched_rate = (unmatched_txn / total_txn * 100) if total_txn > 0 else 0
+    top1 = None
+    top3 = None
+    try:
+        eval_qs = Transaction.objects.exclude(deleted=1).exclude(consume_code__isnull=True).exclude(consume_code="").only("transaction_desc", "consume_code")
+        rules = list(ConsumeRule.objects.filter(active=1).only("categoryId", "pattern", "patternType", "priority"))
+        other_codes = _other_category_codes()
+        def _norm_text(s):
+            try:
+                import unicodedata, re as _re
+                s = unicodedata.normalize("NFKC", s or "")
+            except Exception:
+                s = s or ""
+            s = s.strip().lower()
+            import re
+            s = re.sub(r"\s+", " ", s)
+            return s
+        def _match_text(rule, text):
+            pt = rule.patternType or "contains"
+            pat = _norm_text(rule.pattern or "")
+            if not pat:
+                return False
+            t = _norm_text(text or "")
+            if pt == "contains":
+                return pat in t
+            if pt == "equals":
+                return pat == t
+            if pt == "startsWith":
+                return t.startswith(pat)
+            if pt == "endsWith":
+                return t.endswith(pat)
+            if pt == "regex":
+                try:
+                    import re
+                    return re.search(rule.pattern or "", text or "") is not None
+                except Exception:
+                    return False
+            return False
+        total_eval = 0
+        hit1 = 0
+        hit3 = 0
+        for t in eval_qs[:1000]:
+            truth = t.consume_code or ""
+            if (not truth) or (truth in other_codes):
+                continue
+            score_map = {}
+            count_map = {}
+            desc = t.transaction_desc or ""
+            for r in rules:
+                try:
+                    ok = _match_text(r, desc)
+                except Exception:
+                    ok = False
+                if ok:
+                    k = r.categoryId or ""
+                    if not k:
+                        continue
+                    base = int(r.priority or 100)
+                    bonus = 60
+                    pt = (r.patternType or "contains").lower()
+                    if pt == "equals":
+                        bonus = 100
+                    elif pt == "regex":
+                        bonus = 90
+                    elif pt in ("startswith", "endswith"):
+                        bonus = 80
+                    score_map[k] = score_map.get(k, 0) + base + bonus
+                    count_map[k] = count_map.get(k, 0) + 1
+            for k in list(score_map.keys()):
+                if k in other_codes:
+                    score_map.pop(k, None)
+                    count_map.pop(k, None)
+            keys = sorted(score_map.keys(), key=lambda kk: score_map.get(kk, 0), reverse=True)[:3]
+            if not keys:
+                continue
+            total_eval += 1
+            if keys[0] == truth:
+                hit1 += 1
+            if truth in keys:
+                hit3 += 1
+        if total_eval > 0:
+            top1 = hit1 / total_eval
+            top3 = hit3 / total_eval
+    except Exception:
+        top1 = None
+        top3 = None
+    metrics = {
+        "coverageRate": cov.get("rate", 0),
+        "totalTxns": total_txn,
+        "coveredTxns": cov.get("covered", 0),
+        "unmatchedRate": round(unmatched_rate, 1),
+        "unmatchedTxns": unmatched_txn,
+        "modelTopK": {
+            "top1": top1,
+            "top3": top3
+        }
+    }
+    try:
+        logger.info(
+            "dashboard_model_metrics_done coverageRate=%s totalTxns=%s coveredTxns=%s "
+            "unmatchedRate=%s unmatchedTxns=%s top1=%s top3=%s",
+            metrics.get("coverageRate"),
+            metrics.get("totalTxns"),
+            metrics.get("coveredTxns"),
+            metrics.get("unmatchedRate"),
+            metrics.get("unmatchedTxns"),
+            metrics.get("modelTopK", {}).get("top1"),
+            metrics.get("modelTopK", {}).get("top3"),
+        )
+    except Exception:
+        pass
+    return JsonResponse(metrics)
+
 @csrf_exempt
 @require_POST
 def dashboard_unmatched_tops(request):

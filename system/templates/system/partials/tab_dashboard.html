@@ -36,5 +36,56 @@
             </div>
         </div>
     </div>
+    <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-title">模型表现 / Model Performance</div>
+        <div v-if="modelMetricsLoading" style="padding: 12px;">Loading model metrics...</div>
+        <div v-else-if="!modelMetrics" style="padding: 12px;">
+            <button class="primary" @click="fetchModelMetrics">Load Model Metrics</button>
+        </div>
+        <div v-else class="model-metrics-grid">
+            <div class="metric-item">
+                <div class="metric-label">规则覆盖率</div>
+                <div class="metric-value">
+                    {{ (modelMetrics.coverageRate || 0).toFixed(1) }}%
+                </div>
+                <div class="metric-sub">
+                    覆盖 {{ modelMetrics.coveredTxns || 0 }} / {{ modelMetrics.totalTxns || 0 }} 笔交易
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">未匹配占比</div>
+                <div class="metric-value">
+                    {{ (modelMetrics.unmatchedRate || 0).toFixed(1) }}%
+                </div>
+                <div class="metric-sub">
+                    未匹配 {{ modelMetrics.unmatchedTxns || 0 }} 笔
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">模型 Top-1 准确率</div>
+                <div class="metric-value">
+                    <span v-if="modelMetrics.modelTopK && modelMetrics.modelTopK.top1 != null">
+                        {{ (modelMetrics.modelTopK.top1 * 100).toFixed(1) }}%
+                    </span>
+                    <span v-else>未配置</span>
+                </div>
+                <div class="metric-sub">
+                    可在接入训练模型后填充
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">模型 Top-3 准确率</div>
+                <div class="metric-value">
+                    <span v-if="modelMetrics.modelTopK && modelMetrics.modelTopK.top3 != null">
+                        {{ (modelMetrics.modelTopK.top3 * 100).toFixed(1) }}%
+                    </span>
+                    <span v-else>未配置</span>
+                </div>
+                <div class="metric-sub">
+                    预留指标，后续可从离线评估导入
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endverbatim %}
