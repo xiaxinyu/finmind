@@ -517,8 +517,14 @@
         
         const ctxTrendEl = document.getElementById('lifestyleTrendChart');
         if (ctxTrendEl) {
-          const ctx = ctxTrendEl.getContext('2d');
+          // Check if existing chart is valid for this canvas
+          if (this.lifestyleTrendChart && this.lifestyleTrendChart.canvas !== ctxTrendEl) {
+            this.lifestyleTrendChart.destroy();
+            this.lifestyleTrendChart = null;
+          }
+
           if (!this.lifestyleTrendChart) {
+            const ctx = ctxTrendEl.getContext('2d');
             this.lifestyleTrendChart = new Chart(ctx, {
               type: 'line',
               data: {
@@ -531,7 +537,8 @@
                     backgroundColor: 'rgba(96,165,250,0.15)',
                     tension: 0.3,
                     fill: true,
-                    pointRadius: 3
+                    pointRadius: points.length > 60 ? 1 : 3, // Smaller points for dense data
+                    pointHoverRadius: 5
                   },
                   {
                     label: '非必要开支',
@@ -540,7 +547,8 @@
                     backgroundColor: 'rgba(239,68,68,0.10)',
                     tension: 0.3,
                     fill: true,
-                    pointRadius: 3
+                    pointRadius: points.length > 60 ? 1 : 3,
+                    pointHoverRadius: 5
                   },
                   {
                     label: '固定支出',
@@ -549,13 +557,15 @@
                     backgroundColor: 'rgba(167,139,250,0.10)',
                     tension: 0.3,
                     fill: true,
-                    pointRadius: 3
+                    pointRadius: points.length > 60 ? 1 : 3,
+                    pointHoverRadius: 5
                   }
                 ]
               },
               options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: { duration: 500 }, // Faster animation
                 plugins: {
                   legend: { 
                     display: true,
@@ -575,7 +585,7 @@
                   x: { 
                     display: true,
                     grid: { color: gridColor },
-                    ticks: { color: textColor }
+                    ticks: { color: textColor, maxTicksLimit: 12 } // Limit x-axis labels
                   },
                   y: { 
                     display: true,
@@ -594,20 +604,22 @@
             this.lifestyleTrendChart.data.labels = labels;
             this.lifestyleTrendChart.data.datasets[0].data = totalData;
             this.lifestyleTrendChart.data.datasets[1].data = nonEssentialData;
-            if (this.lifestyleTrendChart.data.datasets[2]) {
-              this.lifestyleTrendChart.data.datasets[2].data = fixedData;
+            // Ensure dataset[2] exists (fixed expense)
+            if (!this.lifestyleTrendChart.data.datasets[2]) {
+               this.lifestyleTrendChart.data.datasets.push({
+                    label: '固定支出',
+                    data: fixedData,
+                    borderColor: this.palette[4] || '#a78bfa',
+                    backgroundColor: 'rgba(167,139,250,0.10)',
+                    tension: 0.3,
+                    fill: true,
+                    pointRadius: points.length > 60 ? 1 : 3,
+                    pointHoverRadius: 5
+               });
             } else {
-              this.lifestyleTrendChart.data.datasets.push({
-                label: '固定支出',
-                data: fixedData,
-                borderColor: this.palette[4] || '#a78bfa',
-                backgroundColor: 'rgba(167,139,250,0.10)',
-                tension: 0.3,
-                fill: true,
-                pointRadius: 3
-              });
+               this.lifestyleTrendChart.data.datasets[2].data = fixedData;
             }
-            this.lifestyleTrendChart.update();
+            this.lifestyleTrendChart.update('none'); // Update without animation for performance
           }
         }
         
@@ -618,8 +630,14 @@
         
         const ctxRadarEl = document.getElementById('lifestyleRadarChart');
         if (ctxRadarEl) {
-          const ctxR = ctxRadarEl.getContext('2d');
+          // Check if existing chart is valid for this canvas
+          if (this.lifestyleRadarChart && this.lifestyleRadarChart.canvas !== ctxRadarEl) {
+            this.lifestyleRadarChart.destroy();
+            this.lifestyleRadarChart = null;
+          }
+
           if (!this.lifestyleRadarChart) {
+            const ctxR = ctxRadarEl.getContext('2d');
             this.lifestyleRadarChart = new Chart(ctxR, {
               type: 'radar',
               data: {
@@ -644,6 +662,7 @@
               options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: { duration: 500 },
                 plugins: {
                   legend: { 
                     labels: { color: textColor } 
@@ -676,7 +695,7 @@
             this.lifestyleRadarChart.data.labels = radarLabels;
             this.lifestyleRadarChart.data.datasets[0].data = amountRatios;
             this.lifestyleRadarChart.data.datasets[1].data = countRatios;
-            this.lifestyleRadarChart.update();
+            this.lifestyleRadarChart.update('none');
           }
         }
       },

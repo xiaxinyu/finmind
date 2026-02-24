@@ -492,12 +492,15 @@ class LifestyleAnalyzer:
             amount_ratio = round(amt / total_amount_safe, 4)
             count_ratio = round(cnt / total_count_safe, 4)
             label = label_map.get(period, period)
+            
+            # Populate Radar Data
             radar.append({
-                "mode": period,
                 "label": label,
+                "mode": period,
                 "amount_ratio": amount_ratio,
                 "count_ratio": count_ratio
             })
+
             mode_stats[period] = {
                 "amount": amt,
                 "count": cnt,
