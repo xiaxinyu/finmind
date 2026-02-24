@@ -20,6 +20,10 @@
         modelMetricsLastUpdated: '',
         lifestyleResult: null,
         lifestyleLoading: false,
+        lifestyleMonths: 12, // Default to 12 months for better data coverage
+        lifestyleTrendChart: null,
+        lifestyleRadarChart: null,
+        lifestyleActiveModeKey: '',
         unmatchedRows: [],
         unmatchedLoading: false,
         unmatchedSummary: null,
@@ -120,6 +124,13 @@
       recommendedUnmatched() {
         const rows = Array.isArray(this.unmatchedRows) ? this.unmatchedRows : [];
         return rows.filter(r => r && r._reco);
+      },
+      activeLifestyleMode() {
+        const modes = (this.lifestyleResult && Array.isArray(this.lifestyleResult.modes)) ? this.lifestyleResult.modes : [];
+        if (!modes.length) return null;
+        const key = this.lifestyleActiveModeKey || (modes[0] && modes[0].key) || '';
+        if (!key) return modes[0] || null;
+        return modes.find(m => m && m.key === key) || modes[0] || null;
       },
       pendingRecommendationsCount() {
         const rows = Array.isArray(this.unmatchedRows) ? this.unmatchedRows : [];
@@ -458,20 +469,219 @@
           }
         }
       },
-      async fetchLifestyleAnalysis() {
-        this.lifestyleLoading = true;
-        try {
-          const r = await fetch('/api/dashboard/lifestyle', { method: 'POST' });
-          if (r.ok) {
-            this.lifestyleResult = await r.json();
-          } else {
-            this.showToast('Failed to load lifestyle analysis', 'error');
-          }
-        } catch(e) {
-          this.showToast('Error loading lifestyle analysis', 'error');
-        } finally {
-          this.lifestyleLoading = false;
+        async fetchLifestyleAnalysis() {
+            this.lifestyleLoading = true;
+            try {
+                // If lifestyleMonths is 0 (All Time), send 0. Otherwise use value or default 12.
+                const months = this.lifestyleMonths === 0 ? 0 : (this.lifestyleMonths || 12);
+                const r = await fetch('/api/dashboard/lifestyle', { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ months: months })
+                });
+                if (r.ok) {
+                    this.lifestyleResult = await r.json();
+                    this.postProcessLifestyle();
+                } else {
+                    this.showToast('Failed to load lifestyle analysis', 'error');
+                }
+            } catch(e) {
+                this.showToast('Error loading lifestyle analysis', 'error');
+            } finally {
+                this.lifestyleLoading = false;
+            }
+        },
+      postProcessLifestyle() {
+        const res = this.lifestyleResult || {};
+        const modes = Array.isArray(res.modes) ? res.modes : [];
+        if (modes.length && !this.lifestyleActiveModeKey) {
+          this.lifestyleActiveModeKey = modes[0].key || '';
         }
+        this.$nextTick(() => {
+          this.updateLifestyleCharts();
+        });
+      },
+      updateLifestyleCharts() {
+        if (!this.lifestyleResult || !window.Chart) return;
+        
+        // Dark mode friendly colors
+        const textColor = '#cbd5e1';
+        const gridColor = '#334155';
+        
+        const ts = this.lifestyleResult.timeseries || {};
+        const points = Array.isArray(ts.points) ? ts.points : [];
+        const labels = points.map(p => p.date);
+        const totalData = points.map(p => p.total || 0);
+        const nonEssentialData = points.map(p => p.non_essential || 0);
+        const fixedData = points.map(p => p.fixed_expense || 0);
+        
+        const ctxTrendEl = document.getElementById('lifestyleTrendChart');
+        if (ctxTrendEl) {
+          const ctx = ctxTrendEl.getContext('2d');
+          if (!this.lifestyleTrendChart) {
+            this.lifestyleTrendChart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels,
+                datasets: [
+                  {
+                    label: '总消费',
+                    data: totalData,
+                    borderColor: this.palette[1] || '#60a5fa',
+                    backgroundColor: 'rgba(96,165,250,0.15)',
+                    tension: 0.3,
+                    fill: true,
+                    pointRadius: 3
+                  },
+                  {
+                    label: '非必要开支',
+                    data: nonEssentialData,
+                    borderColor: this.palette[3] || '#ef4444',
+                    backgroundColor: 'rgba(239,68,68,0.10)',
+                    tension: 0.3,
+                    fill: true,
+                    pointRadius: 3
+                  },
+                  {
+                    label: '固定支出',
+                    data: fixedData,
+                    borderColor: this.palette[4] || '#a78bfa',
+                    backgroundColor: 'rgba(167,139,250,0.10)',
+                    tension: 0.3,
+                    fill: true,
+                    pointRadius: 3
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { 
+                    display: true,
+                    labels: { color: textColor }
+                  },
+                  tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#e2e8f0',
+                    borderColor: '#475569',
+                    borderWidth: 1
+                  }
+                },
+                scales: {
+                  x: { 
+                    display: true,
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                  },
+                  y: { 
+                    display: true,
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                  }
+                },
+                interaction: {
+                  mode: 'nearest',
+                  axis: 'x',
+                  intersect: false
+                }
+              }
+            });
+          } else {
+            this.lifestyleTrendChart.data.labels = labels;
+            this.lifestyleTrendChart.data.datasets[0].data = totalData;
+            this.lifestyleTrendChart.data.datasets[1].data = nonEssentialData;
+            if (this.lifestyleTrendChart.data.datasets[2]) {
+              this.lifestyleTrendChart.data.datasets[2].data = fixedData;
+            } else {
+              this.lifestyleTrendChart.data.datasets.push({
+                label: '固定支出',
+                data: fixedData,
+                borderColor: this.palette[4] || '#a78bfa',
+                backgroundColor: 'rgba(167,139,250,0.10)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 3
+              });
+            }
+            this.lifestyleTrendChart.update();
+          }
+        }
+        
+        const radarSrc = Array.isArray(this.lifestyleResult.radar) ? this.lifestyleResult.radar : [];
+        const radarLabels = radarSrc.map(x => x.label || x.mode);
+        const amountRatios = radarSrc.map(x => (x.amount_ratio || 0) * 100);
+        const countRatios = radarSrc.map(x => (x.count_ratio || 0) * 100);
+        
+        const ctxRadarEl = document.getElementById('lifestyleRadarChart');
+        if (ctxRadarEl) {
+          const ctxR = ctxRadarEl.getContext('2d');
+          if (!this.lifestyleRadarChart) {
+            this.lifestyleRadarChart = new Chart(ctxR, {
+              type: 'radar',
+              data: {
+                labels: radarLabels,
+                datasets: [
+                  {
+                    label: '金额占比',
+                    data: amountRatios,
+                    borderColor: this.palette[2] || '#f59e0b',
+                    backgroundColor: 'rgba(245,158,11,0.2)',
+                    pointBackgroundColor: this.palette[2] || '#f59e0b'
+                  },
+                  {
+                    label: '交易频次占比',
+                    data: countRatios,
+                    borderColor: this.palette[0] || '#22c55e',
+                    backgroundColor: 'rgba(34,197,94,0.2)',
+                    pointBackgroundColor: this.palette[0] || '#22c55e'
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { 
+                    labels: { color: textColor } 
+                  },
+                  tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#e2e8f0',
+                    borderColor: '#475569',
+                    borderWidth: 1
+                  }
+                },
+                scales: {
+                  r: {
+                    angleLines: { display: true, color: gridColor },
+                    grid: { color: gridColor },
+                    pointLabels: { color: textColor, font: { size: 11 } },
+                    suggestedMin: 0,
+                    suggestedMax: 100,
+                    ticks: {
+                      backdropColor: 'transparent',
+                      color: '#94a3b8',
+                      showLabelBackdrop: false
+                    }
+                  }
+                }
+              }
+            });
+          } else {
+            this.lifestyleRadarChart.data.labels = radarLabels;
+            this.lifestyleRadarChart.data.datasets[0].data = amountRatios;
+            this.lifestyleRadarChart.data.datasets[1].data = countRatios;
+            this.lifestyleRadarChart.update();
+          }
+        }
+      },
+      selectLifestyleMode(key) {
+        this.lifestyleActiveModeKey = key || '';
       },
       async fetchUnmatchedDimensions() {
         try {

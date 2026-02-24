@@ -966,8 +966,23 @@ def rule_batch_assign(request):
 @require_POST
 def dashboard_lifestyle(request):
     try:
+        # Parse parameters from request body if available
+        months = 6
+        try:
+            if request.body:
+                data = json.loads(request.body)
+                if 'months' in data:
+                    months = int(data['months'])
+        except:
+            pass
+            
+        # Get user_id from request if authenticated
+        user_id = None
+        if request.user.is_authenticated:
+            user_id = request.user.username
+            
         analyzer = LifestyleAnalyzer()
-        result = analyzer.analyze()
+        result = analyzer.analyze(user_id=user_id, months=months)
         return JsonResponse(result)
     except Exception as e:
         logger.error(f"Lifestyle analysis failed: {str(e)}")
