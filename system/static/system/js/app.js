@@ -18,6 +18,8 @@
         modelMetrics: null,
         modelMetricsLoading: false,
         modelMetricsLastUpdated: '',
+        lifestyleResult: null,
+        lifestyleLoading: false,
         unmatchedRows: [],
         unmatchedLoading: false,
         unmatchedSummary: null,
@@ -450,6 +452,25 @@
           // nothing extra
         } else if (t === 'model') {
           this.fetchModelMetrics();
+        } else if (t === 'lifestyle') {
+          if (!this.lifestyleResult) {
+            this.fetchLifestyleAnalysis();
+          }
+        }
+      },
+      async fetchLifestyleAnalysis() {
+        this.lifestyleLoading = true;
+        try {
+          const r = await fetch('/api/dashboard/lifestyle', { method: 'POST' });
+          if (r.ok) {
+            this.lifestyleResult = await r.json();
+          } else {
+            this.showToast('Failed to load lifestyle analysis', 'error');
+          }
+        } catch(e) {
+          this.showToast('Error loading lifestyle analysis', 'error');
+        } finally {
+          this.lifestyleLoading = false;
         }
       },
       async fetchUnmatchedDimensions() {

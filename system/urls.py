@@ -3,6 +3,7 @@ from .views import (
     classify_transaction, insights,
     rule_categories, rule_list, rule_save, rule_delete, rule_counts,
     dashboard_coverage, dashboard_unmatched_tops, dashboard_unmatched_dimensions, dashboard_model_metrics,
+    dashboard_lifestyle,
     rule_recommend, rule_unmatched_details,
     rule_batch_assign
 )
@@ -24,4 +25,5 @@ urlpatterns = [
     path("dashboard/unmatched-tops", dashboard_unmatched_tops),
     path("dashboard/unmatched-dimensions", dashboard_unmatched_dimensions),
     path("dashboard/model-metrics", dashboard_model_metrics),
+    path("dashboard/lifestyle", dashboard_lifestyle),
 ]

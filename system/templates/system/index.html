@@ -25,7 +25,9 @@
                 <div class="menu-item" :class="{active: tab==='coverage'}" @click="switchTab('coverage')">Coverage</div>
                 <div class="menu-item" :class="{active: tab==='assistant'}" @click="switchTab('assistant')">Assistant</div>
                 <div class="menu-item" :class="{active: tab==='model'}" @click="switchTab('model')">Model</div>
-            </aside>
+        <div class="menu-item" :class="{active: tab==='lifestyle'}" @click="switchTab('lifestyle')">Lifestyle</div>
+    </aside>
+
             {% endverbatim %}
             <div class="content">
                 {% include "system/partials/tab_dashboard.html" %}
@@ -72,7 +74,44 @@
                         </div>
                     </div>
                 </div>
+
+                <div v-if="tab==='lifestyle'" class="grid-1">
+                    <div class="card">
+                        <div class="card-title">生活画像 / Lifestyle Analysis</div>
+                        <div style="margin-bottom:20px;">
+                            <button class="primary" @click="fetchLifestyleAnalysis" :disabled="lifestyleLoading">
+                                {{ lifestyleLoading ? '正在分析...' : '生成生活画像' }}
+                            </button>
+                        </div>
+                        
+                        <div v-if="lifestyleResult" class="analysis-result">
+                            <div class="summary-box" style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
+                                <h3 style="margin-top:0;">{{ lifestyleResult.diagnosis.vibe }}</h3>
+                                <p>近期平均每笔消费: ¥{{ lifestyleResult.diagnosis.avg_spend }}</p>
+                                <p>分析样本数: {{ lifestyleResult.total_analyzed }} 笔交易</p>
+                                <div class="tips" style="margin-top:10px; padding:10px; background:#e3f2fd; border-radius:4px; color:#0d47a1;">
+                                    💡 {{ lifestyleResult.tips }}
+                                </div>
+                            </div>
+                            
+                            <h4>消费模式聚类 (Cluster Analysis)</h4>
+                            <div class="clusters-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px;">
+                                <div v-for="(cluster, idx) in lifestyleResult.clusters" :key="idx" class="cluster-card" style="border:1px solid #eee; padding:10px; border-radius:6px;">
+                                    <div style="font-weight:bold; margin-bottom:5px;">{{ cluster.vibe }}</div>
+                                    <div style="font-size:0.9em; color:#666;">
+                                        平均金额: ¥{{ cluster.avg_spend }}<br>
+                                        交易笔数: {{ cluster.total_transactions }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else-if="!lifestyleLoading" style="color:#666; font-style:italic;">
+                            点击上方按钮开始分析您的近期消费习惯...
+                        </div>
+                    </div>
+                </div>
                 {% endverbatim %}
+
             </div>
             {% include "system/partials/ui_overlays.html" %}
         </div>

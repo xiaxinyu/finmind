@@ -14,6 +14,8 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password
 from account.analyzer.ConsumptionAnalyzer import ConsumptionAnalyzer
+from account.analyzer.LifestyleAnalyzer import LifestyleAnalyzer
+
 
 logger = logging.getLogger("finmind.auth")
 
@@ -959,3 +961,15 @@ def rule_batch_assign(request):
                 rule_created = True
                 
     return JsonResponse({"updated": updated_count, "ruleCreated": rule_created})
+
+@csrf_exempt
+@require_POST
+def dashboard_lifestyle(request):
+    try:
+        analyzer = LifestyleAnalyzer()
+        result = analyzer.analyze()
+        return JsonResponse(result)
+    except Exception as e:
+        logger.error(f"Lifestyle analysis failed: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+

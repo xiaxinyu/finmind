@@ -98,6 +98,11 @@ LOGGING = {
         },
     },
     "loggers": {
+        "finmind": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
         "finmind.auth": {
             "handlers": ["console"],
             "level": "INFO",
