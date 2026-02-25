@@ -3,7 +3,7 @@ import numpy as np
 import logging
 from datetime import datetime, timedelta
 from persist.models import Transaction, ConsumeCategory
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -11,8 +11,23 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 logger = logging.getLogger("finmind.analyzer")
 
 class LifestyleAnalyzer:
-    TARGET_PARENTS = ['FIXED', 'LIVING', 'SHOPPING', 'TRANSPORT', 'EDU', 'ENT', 'SOCIAL', 'A10001', 'B10001', 'C10001', 'D10001', 'J10001']
+    # Constants for configuration
+    TARGET_PARENTS = {'FIXED', 'LIVING', 'SHOPPING', 'TRANSPORT', 'EDU', 'ENT', 'SOCIAL', 'A10001', 'B10001', 'C10001', 'D10001', 'J10001'}
+    EXCLUDED_PARENTS = {'INC', 'ASSET', 'LIABILITY', 'INVEST', 'REIMB', 'FP', 'J10001'}
+    NON_ESSENTIAL_PARENTS = {'SHOPPING', 'ENT', 'SOCIAL', '购物消费', '数码电器', 'C10001', 'D10001'}
+    
+    # Class-level cache for category metadata
+    _category_cache = None
 
+    # Fixed expense detection configuration
+    FIXED_EXPENSE_CV_THRESHOLD = 0.15
+    FIXED_EXPENSE_MIN_COUNT = 2
+    FIXED_KEYWORDS = ['房租', '电费', '水费', '燃气', '宽带', '话费', '会员', '订阅', '保险', '物业', 'Rent', 'Subscription', 'Membership']
+    
+    # Clustering configuration
+    CLUSTERING_MAX_CLUSTERS = 5
+    TFIDF_MAX_FEATURES = 5
+    
     def analyze(self, user_id=None, months=6):
         """
         Main entry point for lifestyle analysis.
@@ -56,7 +71,6 @@ class LifestyleAnalyzer:
 
         # Process Data
         data = []
-        excluded_parents = ['INC', 'ASSET', 'LIABILITY', 'INVEST', 'REIMB', 'FP', 'J10001']
         
         for t in qs:
             # Resolve category info
@@ -71,12 +85,14 @@ class LifestyleAnalyzer:
                 parent_id = cat_id
             
             # Check exclusions (Income, Transfers, Investments, Debt Repayments)
-            if parent_id in excluded_parents or cat_id in excluded_parents:
+            if parent_id in self.EXCLUDED_PARENTS or cat_id in self.EXCLUDED_PARENTS:
                 continue
                 
-            parent_name = parent_names.get(parent_id) if parent_id else "Other"
+            parent_name = parent_names.get(parent_id) if parent_id else None
             if not parent_name:
-                parent_name = "Other"
+                # Fallback: if parent is missing, use category name if available, or "Other"
+                # This fixes the issue where everything becomes "Other"
+                parent_name = cat_name if cat_name else "Other"
             
             # Skip non-expense transactions (Income, Transfer, Adjustment, etc.)
             cat_type = category_types.get(cat_id, "expense")
@@ -139,6 +155,9 @@ class LifestyleAnalyzer:
         df['time_diff_hours'] = df['date'].diff().dt.total_seconds() / 3600.0
         df['time_diff_hours'] = df['time_diff_hours'].fillna(0) # First txn has no previous
         
+        # 3. Log Transform Amount (for better clustering of skewed data)
+        df['amount_log'] = np.log1p(df['amount'])
+        
         # Time Period Logic
         def get_time_period(hour):
             if 5 <= hour < 9: return "Breakfast"
@@ -154,29 +173,73 @@ class LifestyleAnalyzer:
     def _load_category_metadata(self):
         """
         Helper to load category mappings from DB.
+        Optimized to use values_list for better performance.
+        Includes simple in-memory caching to avoid redundant DB hits within same process.
         Returns: (category_map, parent_map, parent_names, category_types)
         """
+        if self._category_cache:
+            return self._category_cache
+            
         category_map = {}
         parent_map = {} # child_id -> parent_id
         parent_names = {} # parent_id -> parent_name
         category_types = {} # id -> txn_types
         
         try:
-            cats = ConsumeCategory.objects.all()
+            # Use values to reduce memory footprint and N+1 queries
+            cats = ConsumeCategory.objects.all().values('id', 'name', 'parentId', 'txn_types')
+            
+            # First pass: Build basic maps
             for c in cats:
-                category_map[str(c.id)] = c.name
-                category_types[str(c.id)] = c.txn_types
-                if c.parentId:
-                    parent_map[str(c.id)] = str(c.parentId)
-                else:
-                    # It is a parent (top-level) category
-                    parent_names[str(c.id)] = c.name
+                cid = str(c['id'])
+                cname = c['name']
+                pid = str(c['parentId']) if c['parentId'] else None
+                ctype = c['txn_types']
                 
-                # Check if this category is a target parent or its ID is in target parents
-                if str(c.id) in self.TARGET_PARENTS:
-                    parent_names[str(c.id)] = c.name
+                category_map[cid] = cname
+                category_types[cid] = ctype
+                
+                if pid:
+                    parent_map[cid] = pid
+            
+            # Second pass: Resolve target parent (root or high-level category)
+            # We want to map every category to one of the TARGET_PARENTS if possible, or its top-most root.
+            resolved_parent_map = {}
+            
+            for cid, cname in category_map.items():
+                current_id = cid
+                visited = set()
+                target_found = None
+                
+                # Traverse up
+                while current_id:
+                    if current_id in visited:
+                        break # Cycle detected
+                    visited.add(current_id)
                     
-            logger.info(f"Loaded {len(category_map)} categories from database.")
+                    if current_id in self.TARGET_PARENTS:
+                        target_found = current_id
+                        break
+                    
+                    parent_id = parent_map.get(current_id)
+                    if not parent_id:
+                        # Root reached
+                        target_found = current_id
+                        break
+                    current_id = parent_id
+                
+                if target_found:
+                    resolved_parent_map[cid] = target_found
+                    parent_names[target_found] = category_map.get(target_found, "Unknown")
+            
+            # Update parent_map to point to the resolved target parent
+            parent_map = resolved_parent_map
+            
+            logger.info(f"Loaded {len(category_map)} categories. Resolved {len(parent_names)} unique parent groups.")
+            
+            # Store in cache
+            self._category_cache = (category_map, parent_map, parent_names, category_types)
+            
         except Exception as e:
             logger.error(f"Failed to load categories: {e}")
             
@@ -184,7 +247,7 @@ class LifestyleAnalyzer:
 
     def identify_fixed_expenses(self, df):
         """
-        Identifies fixed expenses using statistical heuristics (Low Variance + Regularity).
+        Identifies fixed expenses using statistical heuristics (Low Variance + Regularity) AND Keywords.
         Adds 'predicted_fixed' column (1 for fixed, 0 for variable).
         """
         logger.info("Identifying fixed expenses...")
@@ -214,20 +277,46 @@ class LifestyleAnalyzer:
         cat_stats['cv'] = cat_stats.apply(lambda x: x['amount_std'] / x['amount_mean'] if x['amount_mean'] > 0 else 0, axis=1)
         
         # 2. Define Rules for "Fixed"
-        # Rule 1: Count >= 2 (must recur) AND CV < 0.15 (very stable amount, e.g. Netflix, Rent)
+        # Rule 1: Count >= 2 (must recur) AND CV < Threshold (very stable amount, e.g. Netflix, Rent)
         # Rule 2: Count >= 2 AND Day Std < 3.0 (very regular timing, e.g. Utilities, Credit Card Bill)
         
         fixed_cats_amount = cat_stats[
-            (cat_stats['count'] >= 2) & 
-            (cat_stats['cv'] < 0.15) 
+            (cat_stats['count'] >= self.FIXED_EXPENSE_MIN_COUNT) & 
+            (cat_stats['cv'] < self.FIXED_EXPENSE_CV_THRESHOLD) 
         ]['category_name'].tolist()
         
         fixed_cats_time = cat_stats[
-            (cat_stats['count'] >= 2) & 
+            (cat_stats['count'] >= self.FIXED_EXPENSE_MIN_COUNT) & 
             (cat_stats['day_std'] < 3.0)
         ]['category_name'].tolist()
         
-        fixed_cats = list(set(fixed_cats_amount + fixed_cats_time))
+        # Rule 3: Keyword Matching (Enhanced)
+        # Check category_name, merchant, and desc for keywords
+        def is_fixed_keyword(text):
+            if not text: return False
+            text = str(text).lower()
+            return any(kw.lower() in text for kw in self.FIXED_KEYWORDS)
+            
+        # Flag each transaction
+        df['has_fixed_keyword'] = df.apply(lambda x: 
+            is_fixed_keyword(x['category_name']) or 
+            is_fixed_keyword(x.get('merchant', '')) or 
+            is_fixed_keyword(x.get('desc', '')), axis=1)
+            
+        # If > 50% of transactions in a category match keywords, consider it fixed
+        keyword_stats = df.groupby('category_name')['has_fixed_keyword'].mean()
+        fixed_cats_keyword = keyword_stats[keyword_stats > 0.5].index.tolist()
+        
+        # Rule 4: Periodic Amount Detection (New)
+        # Group by (Amount, Day of Month) to find exact recurring bills
+        # Round amount to integer for looser matching
+        df['amount_int'] = df['amount'].round(0).astype(int)
+        periodic_stats = df.groupby(['amount_int', 'day', 'category_name']).size().reset_index(name='count')
+        
+        # If same amount on same day happens >= 3 times, it's likely a subscription/bill
+        periodic_cats = periodic_stats[periodic_stats['count'] >= 3]['category_name'].unique().tolist()
+        
+        fixed_cats = list(set(fixed_cats_amount + fixed_cats_time + fixed_cats_keyword + periodic_cats))
         
         # Also include "FIXED" parent transactions if any
         fixed_parent_txns = df[df['parent_name'] == 'FIXED']['category_name'].unique().tolist()
@@ -236,14 +325,21 @@ class LifestyleAnalyzer:
         logger.info(f"Identified {len(fixed_cats)} fixed expense categories: {fixed_cats}")
         
         df['predicted_fixed'] = df['category_name'].apply(lambda x: 1 if x in fixed_cats else 0)
-        non_essential_parents = ['SHOPPING', 'ENT', 'SOCIAL', '购物消费', '数码电器', 'C10001', 'D10001']
-        df['is_non_essential'] = df['parent_name'].isin(non_essential_parents).astype(int)
+        df['is_non_essential'] = df['parent_name'].isin(self.NON_ESSENTIAL_PARENTS).astype(int)
+        
+        # Clean up temporary columns
+        if 'amount_int' in df.columns:
+            del df['amount_int']
+        # Do not delete 'day' as it is used in report generation
+        # if 'day' in df.columns:
+        #    del df['day']
         
         return df
 
     def predict_next_month_budget(self, df):
         """
         Predicts next month's total budget using Linear Regression on monthly totals.
+        Returns prediction, trend, and confidence score.
         """
         try:
             # 1. Aggregate by Month
@@ -256,19 +352,49 @@ class LifestyleAnalyzer:
             # 2. Prepare X (Ordinal Date) and y (Amount)
             monthly_df['month_ordinal'] = monthly_df['date'].map(datetime.toordinal)
             
-            X = monthly_df[['month_ordinal']]
+            # Feature Engineering for Prediction
+            features = ['month_ordinal']
+            
+            # Add seasonality if enough data (>= 12 months)
+            if len(monthly_df) >= 12:
+                monthly_df['month_val'] = monthly_df['date'].dt.month
+                monthly_df['sin_month'] = np.sin(2 * np.pi * monthly_df['month_val'] / 12)
+                monthly_df['cos_month'] = np.cos(2 * np.pi * monthly_df['month_val'] / 12)
+                features.extend(['sin_month', 'cos_month'])
+                logger.info("Using seasonality features for prediction.")
+            
+            X = monthly_df[features]
             y = monthly_df['amount']
             
             # 3. Fit Model
             model = LinearRegression()
             model.fit(X, y)
             
+            # Calculate Confidence (R^2 Score)
+            r2_score = model.score(X, y)
+            
+            # Determine Confidence Level
+            confidence = "Low"
+            if r2_score > 0.7:
+                confidence = "High"
+            elif r2_score > 0.3:
+                confidence = "Medium"
+            
             # 4. Predict Next Month
             last_date = monthly_df['date'].iloc[-1]
             next_month_date = last_date + timedelta(days=30) # Approx
             
+            # Prepare next month features
+            next_month_features = {'month_ordinal': [next_month_date.toordinal()]}
+            if 'sin_month' in features:
+                nm_month = next_month_date.month
+                next_month_features['sin_month'] = [np.sin(2 * np.pi * nm_month / 12)]
+                next_month_features['cos_month'] = [np.cos(2 * np.pi * nm_month / 12)]
+                
             # Use DataFrame with same feature name to avoid warning
-            next_month_df = pd.DataFrame({'month_ordinal': [next_month_date.toordinal()]})
+            next_month_df = pd.DataFrame(next_month_features)
+            # Ensure column order matches X
+            next_month_df = next_month_df[features]
             
             pred_amount = model.predict(next_month_df)[0]
             
@@ -285,16 +411,18 @@ class LifestyleAnalyzer:
             return {
                 "next_month_amount": max(0, round(pred_amount, 2)),
                 "trend": trend,
-                "confidence": "Medium" 
+                "confidence": confidence,
+                "r2_score": round(r2_score, 2)
             }
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
             return {"error": str(e)}
 
-    def run_clustering_algorithm(self, df, months=6):
+    def run_clustering_algorithm(self, df, months=6, algorithm='kmeans'):
         """
         Performs Fixed Expense Detection, Feature Engineering, Clustering, and Prediction.
+        algorithm: 'kmeans' or 'dbscan'
         """
         # 1. Identify Fixed Expenses (New Step)
         df = self.identify_fixed_expenses(df)
@@ -308,8 +436,8 @@ class LifestyleAnalyzer:
         df = df.sort_values('date').reset_index(drop=True)
         
         # Select features
-        # Base numerical features
-        feature_cols = ['amount', 'hour', 'is_weekend', 'time_diff_hours']
+        # Base numerical features: Use amount_log instead of raw amount
+        feature_cols = ['amount_log', 'hour', 'is_weekend', 'time_diff_hours']
         
         # One-Hot Encoding for Parent Categories
         parent_dummies = pd.get_dummies(df['parent_name'], prefix='parent')
@@ -328,7 +456,7 @@ class LifestyleAnalyzer:
             
             # Limit features to keep dimensions reasonable
             # Use simple token pattern to include Chinese/English words
-            tfidf = TfidfVectorizer(max_features=5, stop_words='english')
+            tfidf = TfidfVectorizer(max_features=self.TFIDF_MAX_FEATURES, stop_words='english')
             tfidf_matrix = tfidf.fit_transform(text_data)
             
             # Create DataFrame for TF-IDF features
@@ -345,7 +473,7 @@ class LifestyleAnalyzer:
             logger.warning(f"TF-IDF feature engineering failed: {e}")
 
         # Collect all feature columns
-        train_cols = ['amount', 'hour', 'is_weekend', 'time_diff_hours'] + \
+        train_cols = ['amount_log', 'hour', 'is_weekend', 'time_diff_hours'] + \
                      list(parent_dummies.columns) + \
                      list(period_dummies.columns) + \
                      tfidf_cols
@@ -359,12 +487,24 @@ class LifestyleAnalyzer:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
-        # 3. KMeans Clustering
-        n_clusters = min(5, len(X)) # Increased max clusters to 5 for finer granularity
-        logger.info(f"Using {n_clusters} clusters.")
-        
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        df['lifestyle_label'] = kmeans.fit_predict(X_scaled)
+        # 3. Clustering
+        if algorithm == 'dbscan':
+            # DBSCAN doesn't need n_clusters, but eps/min_samples are crucial
+            # eps=0.5 is default, but since we have high dimensionality (TF-IDF + OneHot), 
+            # points might be sparse. We might need higher eps.
+            logger.info("Using DBSCAN clustering.")
+            dbscan = DBSCAN(eps=2.0, min_samples=3)
+            df['lifestyle_label'] = dbscan.fit_predict(X_scaled)
+            
+            # Map -1 (noise) to a special label or max+1
+            # Actually, -1 is fine, we just label it "Unclassified" in report
+            n_clusters = len(set(df['lifestyle_label'])) - (1 if -1 in df['lifestyle_label'] else 0)
+        else:
+            # Default to KMeans
+            n_clusters = min(self.CLUSTERING_MAX_CLUSTERS, len(X))
+            logger.info(f"Using KMeans with {n_clusters} clusters.")
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            df['lifestyle_label'] = kmeans.fit_predict(X_scaled)
         
         # 4. Generate Enhanced Report
         return self._generate_report(df, n_clusters, months)
@@ -392,7 +532,10 @@ class LifestyleAnalyzer:
             top_parent = subset['parent_name'].mode()[0] if not subset['parent_name'].empty else "Unknown"
             top_period = subset['time_period'].mode()[0] if not subset['time_period'].empty else "Anytime"
             vibe = f"{top_parent} ({top_period})"
-            if top_period == "NightLife":
+            
+            if label == -1:
+                vibe = "❓ 零散消费 (Unclassified)"
+            elif top_period == "NightLife":
                 vibe = "🦉 夜猫子消费"
             elif top_period == "Breakfast":
                 vibe = "🥣 早起鸟"

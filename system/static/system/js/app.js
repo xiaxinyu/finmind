@@ -466,6 +466,10 @@
         } else if (t === 'lifestyle') {
           if (!this.lifestyleResult) {
             this.fetchLifestyleAnalysis();
+          } else {
+            this.$nextTick(() => {
+                this.updateLifestyleCharts();
+            });
           }
         }
       },
@@ -493,6 +497,14 @@
         },
       postProcessLifestyle() {
         const res = this.lifestyleResult || {};
+        // Safety checks for template access
+        if (!res.diagnosis) res.diagnosis = { vibe: 'Uncertain', avg_spend: 0 };
+        if (!res.budget_prediction) res.budget_prediction = { next_month_amount: 0, r2_score: 0, confidence: 'Low' };
+        if (!res.fixed_expense_analysis) res.fixed_expense_analysis = { fixed_ratio: 0, estimated_monthly_fixed: 0, details: [] };
+        if (!res.clusters) res.clusters = [];
+        if (!res.modes) res.modes = [];
+        if (!res.recommendations) res.recommendations = [];
+
         const modes = Array.isArray(res.modes) ? res.modes : [];
         if (modes.length && !this.lifestyleActiveModeKey) {
           this.lifestyleActiveModeKey = modes[0].key || '';
@@ -503,6 +515,13 @@
       },
       updateLifestyleCharts() {
         if (!this.lifestyleResult || !window.Chart) return;
+        
+        requestAnimationFrame(() => {
+            this._renderLifestyleCharts();
+        });
+      },
+      _renderLifestyleCharts() {
+        if (!this.lifestyleResult) return;
         
         // Dark mode friendly colors
         const textColor = '#cbd5e1';
@@ -517,10 +536,12 @@
         
         const ctxTrendEl = document.getElementById('lifestyleTrendChart');
         if (ctxTrendEl) {
-          // Check if existing chart is valid for this canvas
-          if (this.lifestyleTrendChart && this.lifestyleTrendChart.canvas !== ctxTrendEl) {
-            this.lifestyleTrendChart.destroy();
-            this.lifestyleTrendChart = null;
+          if (this.lifestyleTrendChart) {
+             // If canvas element has changed (e.g. re-render), destroy old instance
+             if (this.lifestyleTrendChart.canvas !== ctxTrendEl) {
+                 this.lifestyleTrendChart.destroy();
+                 this.lifestyleTrendChart = null;
+             }
           }
 
           if (!this.lifestyleTrendChart) {
@@ -537,7 +558,7 @@
                     backgroundColor: 'rgba(96,165,250,0.15)',
                     tension: 0.3,
                     fill: true,
-                    pointRadius: points.length > 60 ? 1 : 3, // Smaller points for dense data
+                    pointRadius: points.length > 60 ? 1 : 3,
                     pointHoverRadius: 5
                   },
                   {
@@ -565,7 +586,7 @@
               options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: 500 }, // Faster animation
+                animation: { duration: 0 }, // Disable initial animation for snappiness
                 plugins: {
                   legend: { 
                     display: true,
@@ -585,7 +606,7 @@
                   x: { 
                     display: true,
                     grid: { color: gridColor },
-                    ticks: { color: textColor, maxTicksLimit: 12 } // Limit x-axis labels
+                    ticks: { color: textColor, maxTicksLimit: 12 }
                   },
                   y: { 
                     display: true,
@@ -601,12 +622,13 @@
               }
             });
           } else {
-            this.lifestyleTrendChart.data.labels = labels;
-            this.lifestyleTrendChart.data.datasets[0].data = totalData;
-            this.lifestyleTrendChart.data.datasets[1].data = nonEssentialData;
-            // Ensure dataset[2] exists (fixed expense)
-            if (!this.lifestyleTrendChart.data.datasets[2]) {
-               this.lifestyleTrendChart.data.datasets.push({
+            // Update existing chart
+            const chart = this.lifestyleTrendChart;
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = totalData;
+            chart.data.datasets[1].data = nonEssentialData;
+            if (!chart.data.datasets[2]) {
+               chart.data.datasets.push({
                     label: '固定支出',
                     data: fixedData,
                     borderColor: this.palette[4] || '#a78bfa',
@@ -617,9 +639,9 @@
                     pointHoverRadius: 5
                });
             } else {
-               this.lifestyleTrendChart.data.datasets[2].data = fixedData;
+               chart.data.datasets[2].data = fixedData;
             }
-            this.lifestyleTrendChart.update('none'); // Update without animation for performance
+            chart.update('none');
           }
         }
         
@@ -630,10 +652,11 @@
         
         const ctxRadarEl = document.getElementById('lifestyleRadarChart');
         if (ctxRadarEl) {
-          // Check if existing chart is valid for this canvas
-          if (this.lifestyleRadarChart && this.lifestyleRadarChart.canvas !== ctxRadarEl) {
-            this.lifestyleRadarChart.destroy();
-            this.lifestyleRadarChart = null;
+          if (this.lifestyleRadarChart) {
+            if (this.lifestyleRadarChart.canvas !== ctxRadarEl) {
+                this.lifestyleRadarChart.destroy();
+                this.lifestyleRadarChart = null;
+            }
           }
 
           if (!this.lifestyleRadarChart) {
@@ -662,7 +685,7 @@
               options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: 500 },
+                animation: { duration: 0 },
                 plugins: {
                   legend: { 
                     labels: { color: textColor } 
@@ -677,25 +700,20 @@
                 },
                 scales: {
                   r: {
-                    angleLines: { display: true, color: gridColor },
+                    angleLines: { color: gridColor },
                     grid: { color: gridColor },
-                    pointLabels: { color: textColor, font: { size: 11 } },
-                    suggestedMin: 0,
-                    suggestedMax: 100,
-                    ticks: {
-                      backdropColor: 'transparent',
-                      color: '#94a3b8',
-                      showLabelBackdrop: false
-                    }
+                    pointLabels: { color: textColor, font: { size: 12 } },
+                    ticks: { display: false, backdropColor: 'transparent' }
                   }
                 }
               }
             });
           } else {
-            this.lifestyleRadarChart.data.labels = radarLabels;
-            this.lifestyleRadarChart.data.datasets[0].data = amountRatios;
-            this.lifestyleRadarChart.data.datasets[1].data = countRatios;
-            this.lifestyleRadarChart.update('none');
+            const chart = this.lifestyleRadarChart;
+            chart.data.labels = radarLabels;
+            chart.data.datasets[0].data = amountRatios;
+            chart.data.datasets[1].data = countRatios;
+            chart.update('none');
           }
         }
       },

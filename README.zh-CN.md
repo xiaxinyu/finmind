@@ -90,11 +90,36 @@ finmind/
   - 返回：按消费类型的金额分布与占比
 
 ## 🚀 快速开始
+
+### 1. 环境配置（推荐）
+建议使用虚拟环境来管理项目依赖，避免污染全局环境。
+
+```bash
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活虚拟环境
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
 ```
+
+### 2. 安装依赖
+如果你遇到 `ModuleNotFoundError: No module named 'django'` 错误，通常是因为跳过了这一步。
+
+```bash
 pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
 ```
+
+### 3. 初始化数据库
+```bash
+python3 manage.py migrate
+```
+
+### 4. 启动服务
+```bash
+python3 manage.py runserver
+```
+启动后访问 `http://127.0.0.1:8000/` 即可使用。
 
 ## 🧭 标语
 - 主标语：Where Transactions Become Understanding  

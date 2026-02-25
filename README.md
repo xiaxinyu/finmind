@@ -90,11 +90,36 @@ finmind/
   - return: totals and ratios by consumption type
 
 ## 🚀 Quick Start
+
+### 1. Environment Setup (Recommended)
+It is highly recommended to use a virtual environment to manage dependencies.
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
 ```
+
+### 2. Install Dependencies
+If you encounter `ModuleNotFoundError: No module named 'django'`, you likely missed this step.
+
+```bash
 pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
 ```
+
+### 3. Initialize Database
+```bash
+python3 manage.py migrate
+```
+
+### 4. Run Server
+```bash
+python3 manage.py runserver
+```
+Access the application at `http://127.0.0.1:8000/`.
 
 ## 🧭 Slogan
 - Primary: Where Transactions Become Understanding.  
